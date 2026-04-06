@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { pickTextColorForPillBg } from "@/lib/color-contrast";
 import { Link, useLocation, useNavigate, useParams } from "@/lib/router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -74,6 +74,11 @@ type IssueDetailComment = (IssueComment | OptimisticIssueComment) & {
   queueState?: "queued";
   queueTargetRunId?: string | null;
 };
+
+const ACTIVE_ISSUE_RUN_POLL_INTERVAL_MS = 3000;
+const IDLE_ISSUE_RUN_POLL_INTERVAL_MS = 30000;
+const ACTIVE_ISSUE_TIMELINE_POLL_INTERVAL_MS = 5000;
+const IDLE_ISSUE_TIMELINE_POLL_INTERVAL_MS = 30000;
 
 const ACTION_LABELS: Record<string, string> = {
   "issue.created": "created the issue",
@@ -249,13 +254,6 @@ export function IssueDetail() {
     enabled: !!issueId,
   });
 
-  const { data: linkedRuns } = useQuery({
-    queryKey: queryKeys.issues.runs(issueId!),
-    queryFn: () => activityApi.runsForIssue(issueId!),
-    enabled: !!issueId,
-    refetchInterval: 5000,
-  });
-
   const { data: linkedApprovals } = useQuery({
     queryKey: queryKeys.issues.approvals(issueId!),
     queryFn: () => issuesApi.listApprovals(issueId!),
@@ -272,17 +270,33 @@ export function IssueDetail() {
     queryKey: queryKeys.issues.liveRuns(issueId!),
     queryFn: () => heartbeatsApi.liveRunsForIssue(issueId!),
     enabled: !!issueId,
-    refetchInterval: 3000,
+    refetchInterval: (query) => {
+      const data = query.state.data as Array<unknown> | undefined;
+      return data && data.length > 0
+        ? ACTIVE_ISSUE_RUN_POLL_INTERVAL_MS
+        : IDLE_ISSUE_RUN_POLL_INTERVAL_MS;
+    },
   });
 
   const { data: activeRun } = useQuery({
     queryKey: queryKeys.issues.activeRun(issueId!),
     queryFn: () => heartbeatsApi.activeRunForIssue(issueId!),
     enabled: !!issueId,
-    refetchInterval: 3000,
+    refetchInterval: (query) =>
+      query.state.data
+        ? ACTIVE_ISSUE_RUN_POLL_INTERVAL_MS
+        : IDLE_ISSUE_RUN_POLL_INTERVAL_MS,
   });
 
   const hasLiveRuns = (liveRuns ?? []).length > 0 || !!activeRun;
+  const { data: linkedRuns } = useQuery({
+    queryKey: queryKeys.issues.runs(issueId!),
+    queryFn: () => activityApi.runsForIssue(issueId!),
+    enabled: !!issueId,
+    refetchInterval: hasLiveRuns
+      ? ACTIVE_ISSUE_TIMELINE_POLL_INTERVAL_MS
+      : IDLE_ISSUE_TIMELINE_POLL_INTERVAL_MS,
+  });
   const runningIssueRun = useMemo(
     () => (
       activeRun?.status === "running"
@@ -774,6 +788,39 @@ export function IssueDetail() {
     },
   });
 
+  const handleInterruptQueued = useCallback(
+    async (runId: string) => {
+      await interruptQueuedComment.mutateAsync(runId);
+    },
+    [interruptQueuedComment],
+  );
+
+  const handleCommentImageUpload = useCallback(
+    async (file: File) => {
+      const attachment = await uploadAttachment.mutateAsync(file);
+      return attachment.contentPath;
+    },
+    [uploadAttachment],
+  );
+
+  const handleCommentAttachImage = useCallback(
+    async (file: File) => {
+      await uploadAttachment.mutateAsync(file);
+    },
+    [uploadAttachment],
+  );
+
+  const handleCommentAdd = useCallback(
+    async (body: string, reopen?: boolean, reassignment?: CommentReassignment) => {
+      if (reassignment) {
+        await addCommentAndReassign.mutateAsync({ body, reopen, reassignment });
+        return;
+      }
+      await addComment.mutateAsync({ body, reopen });
+    },
+    [addComment, addCommentAndReassign],
+  );
+
   useEffect(() => {
     const titleLabel = issue?.title ?? issueId ?? "Issue";
     setBreadcrumbs([
@@ -1245,25 +1292,21 @@ export function IssueDetail() {
             currentAssigneeValue={actualAssigneeValue}
             suggestedAssigneeValue={suggestedAssigneeValue}
             mentions={mentionOptions}
-            onInterruptQueued={async (runId) => {
-              await interruptQueuedComment.mutateAsync(runId);
-            }}
+            onInterruptQueued={handleInterruptQueued}
             interruptingQueuedRunId={interruptQueuedComment.isPending ? runningIssueRun?.id ?? null : null}
-            onAdd={async (body, reopen, reassignment) => {
-              if (reassignment) {
-                await addCommentAndReassign.mutateAsync({ body, reopen, reassignment });
-                return;
-              }
-              await addComment.mutateAsync({ body, reopen });
-            }}
-            imageUploadHandler={async (file) => {
-              const attachment = await uploadAttachment.mutateAsync(file);
-              return attachment.contentPath;
-            }}
-            onAttachImage={async (file) => {
-              await uploadAttachment.mutateAsync(file);
-            }}
-            liveRunSlot={<LiveRunWidget issueId={issueId!} companyId={issue.companyId} />}
+            onAdd={handleCommentAdd}
+            imageUploadHandler={handleCommentImageUpload}
+            onAttachImage={handleCommentAttachImage}
+            liveRunSlot={
+              hasLiveRuns ? (
+                <LiveRunWidget
+                  issueId={issueId!}
+                  companyId={issue.companyId}
+                  liveRunsData={liveRuns ?? []}
+                  activeRunData={activeRun ?? null}
+                />
+              ) : null
+            }
           />
         </TabsContent>
 
