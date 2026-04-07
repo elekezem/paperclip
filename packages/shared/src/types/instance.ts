@@ -1,9 +1,11 @@
+import type { UiLanguagePreference } from "../constants.js";
 import type { FeedbackDataSharingPreference } from "./feedback.js";
 
 export interface InstanceGeneralSettings {
   censorUsernameInLogs: boolean;
   keyboardShortcuts: boolean;
   feedbackDataSharingPreference: FeedbackDataSharingPreference;
+  defaultUiLanguage: UiLanguagePreference;
 }
 
 export interface InstanceExperimentalSettings {

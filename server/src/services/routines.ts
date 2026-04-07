@@ -15,6 +15,7 @@ import {
 import type {
   CreateRoutine,
   CreateRoutineTrigger,
+  IdeaIntakeResult,
   Routine,
   RoutineDetail,
   RoutineListItem,
@@ -35,7 +36,11 @@ import { trackRoutineRun } from "@paperclipai/shared/telemetry";
 import { conflict, forbidden, notFound, unauthorized, unprocessable } from "../errors.js";
 import { logger } from "../middleware/logger.js";
 import { getTelemetryClient } from "../telemetry.js";
+import { approvalService } from "./approvals.js";
+import { documentService } from "./documents.js";
 import { issueService } from "./issues.js";
+import { issueApprovalService } from "./issue-approvals.js";
+import { projectService } from "./projects.js";
 import { secretService } from "./secrets.js";
 import { parseCron, validateCron } from "./cron.js";
 import { heartbeatService } from "./heartbeat.js";
@@ -57,6 +62,52 @@ const WEEKDAY_INDEX: Record<string, number> = {
 };
 
 type Actor = { agentId?: string | null; userId?: string | null };
+
+const RESEARCH_KERNEL_URL =
+  process.env.PAPERCLIP_RESEARCH_KERNEL_URL
+  ?? process.env.RESEARCH_KERNEL_URL
+  ?? "http://127.0.0.1:3210";
+const PI_IDEA_INTAKE_MARKER = "paperclip-mode: pi-idea-intake";
+
+function isPiIdeaIntakeRoutine(routine: typeof routines.$inferSelect) {
+  return routine.title === "PI Idea Intake" || routine.description?.includes(PI_IDEA_INTAKE_MARKER) === true;
+}
+
+async function requestResearchKernel<T>(pathname: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(new URL(pathname, RESEARCH_KERNEL_URL), {
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Research Kernel request failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+function buildPiIdeaSummaryComment(input: {
+  proposalTitle: string;
+  benchmarkRating: string;
+  blueprintTitle: string | null;
+}) {
+  return [
+    "PI idea intake package is ready.",
+    "",
+    `- Proposal: ${input.proposalTitle}`,
+    `- Benchmark: ${input.benchmarkRating}`,
+    `- Reference blueprint: ${input.blueprintTitle ?? "none"}`,
+    "",
+    "Next gates:",
+    "1. Review the proposal package.",
+    "2. Review the survey draft and benchmark report.",
+    "3. Decide whether the project should ever promote to Study Launch.",
+  ].join("\n");
+}
 
 function assertTimeZone(timeZone: string) {
   try {
@@ -292,7 +343,11 @@ function mergeRoutineRunPayload(
 }
 
 export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeupDeps } = {}) {
+  const approvalSvc = approvalService(db);
+  const documentsSvc = documentService(db);
   const issueSvc = issueService(db);
+  const issueApprovalsSvc = issueApprovalService(db);
+  const projectSvc = projectService(db);
   const secretsSvc = secretService(db);
   const heartbeat = deps.heartbeat ?? heartbeatService(db);
 
@@ -663,6 +718,231 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
     return value;
   }
 
+  async function dispatchPiIdeaIntakeRun(input: {
+    routine: typeof routines.$inferSelect;
+    trigger: typeof routineTriggers.$inferSelect | null;
+    source: "schedule" | "manual" | "api" | "webhook";
+    payload?: Record<string, unknown> | null;
+    variables?: Record<string, unknown> | null;
+    idempotencyKey?: string | null;
+  }) {
+    const resolvedVariables = resolveRoutineVariableValues(input.routine.variables ?? [], input);
+    const triggerPayload = mergeRoutineRunPayload(input.payload, resolvedVariables);
+    const triggeredAt = new Date();
+    const seedPrompt = typeof resolvedVariables.seed_prompt === "string" ? resolvedVariables.seed_prompt.trim() : "";
+    if (!seedPrompt) {
+      throw unprocessable("Variable \"seed_prompt\" is required");
+    }
+    const domainHint =
+      typeof resolvedVariables.domain_hint === "string" && resolvedVariables.domain_hint.trim().length > 0
+        ? resolvedVariables.domain_hint.trim()
+        : null;
+
+    const createdRun = await db.transaction(async (tx) => {
+      const txDb = tx as unknown as Db;
+      await tx.execute(
+        sql`select id from ${routines} where ${routines.id} = ${input.routine.id} and ${routines.companyId} = ${input.routine.companyId} for update`,
+      );
+
+      if (input.idempotencyKey) {
+        const existing = await txDb
+          .select()
+          .from(routineRuns)
+          .where(
+            and(
+              eq(routineRuns.companyId, input.routine.companyId),
+              eq(routineRuns.routineId, input.routine.id),
+              eq(routineRuns.source, input.source),
+              eq(routineRuns.idempotencyKey, input.idempotencyKey),
+              input.trigger ? eq(routineRuns.triggerId, input.trigger.id) : isNull(routineRuns.triggerId),
+            ),
+          )
+          .orderBy(desc(routineRuns.createdAt))
+          .limit(1)
+          .then((rows) => rows[0] ?? null);
+        if (existing) return existing;
+      }
+
+      const [run] = await txDb
+        .insert(routineRuns)
+        .values({
+          companyId: input.routine.companyId,
+          routineId: input.routine.id,
+          triggerId: input.trigger?.id ?? null,
+          source: input.source,
+          status: "received",
+          triggeredAt,
+          idempotencyKey: input.idempotencyKey ?? null,
+          triggerPayload,
+        })
+        .returning();
+      return run;
+    });
+
+    let createdProjectId: string | null = null;
+    let motherIssueId: string | null = null;
+
+    try {
+      const companyAgentRows = await db
+        .select({ id: agents.id, metadata: agents.metadata })
+        .from(agents)
+        .where(eq(agents.companyId, input.routine.companyId));
+      const agentIdByKey = new Map<string, string>();
+      for (const row of companyAgentRows) {
+        const metadata = isPlainRecord(row.metadata) ? row.metadata : {};
+        const key =
+          typeof metadata.pilotKey === "string"
+            ? metadata.pilotKey
+            : typeof metadata.researchRole === "string"
+              ? metadata.researchRole
+              : null;
+        if (key) agentIdByKey.set(key, row.id);
+      }
+      const resolveResearchAgentId = (key: string | null | undefined, context: string) => {
+        if (!key) return null;
+        const agentId = agentIdByKey.get(key) ?? null;
+        if (!agentId) throw new Error(`Missing research agent "${key}" for ${context}`);
+        return agentId;
+      };
+
+      const intake = await requestResearchKernel<IdeaIntakeResult>(
+        `/api/companies/${input.routine.companyId}/idea-intake`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            seedPrompt,
+            domainHint,
+          }),
+        },
+      );
+
+      const project = await projectSvc.create(input.routine.companyId, {
+        name: intake.project.name,
+        description: intake.project.description,
+        status: intake.project.status,
+        color: intake.project.color ?? undefined,
+        leadAgentId: resolveResearchAgentId("research_chief_of_staff", "PI intake project lead"),
+      });
+      createdProjectId = project.id;
+
+      const motherIssue = await issueSvc.create(input.routine.companyId, {
+        projectId: project.id,
+        goalId: input.routine.goalId,
+        parentId: input.routine.parentIssueId,
+        title: intake.motherIssue.title,
+        description: intake.motherIssue.description,
+        status: intake.motherIssue.status,
+        priority: intake.motherIssue.priority,
+        assigneeAgentId: resolveResearchAgentId(
+          intake.motherIssue.assigneeKey ?? "research_chief_of_staff",
+          "mother issue assignee",
+        ),
+        originKind: "manual",
+      });
+      motherIssueId = motherIssue.id;
+
+      for (const document of intake.documents) {
+        await documentsSvc.upsertIssueDocument({
+          issueId: motherIssue.id,
+          key: document.key,
+          title: document.title,
+          format: "markdown",
+          body: document.body,
+          createdByAgentId: null,
+          createdByUserId: null,
+          createdByRunId: null,
+        });
+      }
+
+      for (const branch of intake.childIssues) {
+        await issueSvc.create(input.routine.companyId, {
+          projectId: project.id,
+          goalId: input.routine.goalId,
+          parentId: motherIssue.id,
+          title: branch.title,
+          description: branch.description,
+          status: branch.status,
+          priority: branch.priority,
+          assigneeAgentId: resolveResearchAgentId(branch.assigneeKey, `branch issue ${branch.laneKey}`),
+          originKind: "manual",
+        });
+      }
+
+      for (const approvalSpec of intake.approvals) {
+        const approval = await approvalSvc.create(input.routine.companyId, {
+          type: approvalSpec.type,
+          requestedByAgentId: resolveResearchAgentId(
+            approvalSpec.ownerAgentKey
+            ?? (approvalSpec.type === "proposal_review" || approvalSpec.type === "survey_review"
+              ? "research_review"
+              : null),
+            `${approvalSpec.type} owner`,
+          ),
+          requestedByUserId: null,
+          payload: approvalSpec.payload,
+          status: "pending",
+          decisionNote: null,
+          decidedByUserId: null,
+          decidedAt: null,
+          updatedAt: new Date(),
+        });
+        await issueApprovalsSvc.linkManyForApproval(approval.id, [motherIssue.id]);
+      }
+
+      await issueSvc.addComment(
+        motherIssue.id,
+        buildPiIdeaSummaryComment({
+          proposalTitle: intake.proposal.title,
+          benchmarkRating: intake.benchmark.overallRating,
+          blueprintTitle: intake.referenceBlueprint?.title ?? null,
+        }),
+        {},
+      );
+
+      const nextRunAt = input.trigger?.kind === "schedule" && input.trigger.cronExpression && input.trigger.timezone
+        ? nextCronTickInTimeZone(input.trigger.cronExpression, input.trigger.timezone, triggeredAt)
+        : undefined;
+
+      const run = await finalizeRun(createdRun.id, {
+        status: "issue_created",
+        linkedIssueId: motherIssue.id,
+      });
+      await updateRoutineTouchedState({
+        routineId: input.routine.id,
+        triggerId: input.trigger?.id ?? null,
+        triggeredAt,
+        status: "issue_created",
+        issueId: motherIssue.id,
+        nextRunAt,
+      });
+      return run ?? createdRun;
+    } catch (error) {
+      const failureReason = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        {
+          err: error,
+          routineId: input.routine.id,
+          runId: createdRun.id,
+          createdProjectId,
+          motherIssueId,
+        },
+        "pi idea intake dispatch failed",
+      );
+      const run = await finalizeRun(createdRun.id, {
+        status: "failed",
+        failureReason,
+        completedAt: new Date(),
+      });
+      await updateRoutineTouchedState({
+        routineId: input.routine.id,
+        triggerId: input.trigger?.id ?? null,
+        triggeredAt,
+        status: "failed",
+      });
+      return run ?? createdRun;
+    }
+  }
+
   async function dispatchRoutineRun(input: {
     routine: typeof routines.$inferSelect;
     trigger: typeof routineTriggers.$inferSelect | null;
@@ -674,6 +954,10 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
     executionWorkspacePreference?: string | null;
     executionWorkspaceSettings?: Record<string, unknown> | null;
   }) {
+    if (isPiIdeaIntakeRoutine(input.routine)) {
+      return dispatchPiIdeaIntakeRun(input);
+    }
+
     const resolvedVariables = resolveRoutineVariableValues(input.routine.variables ?? [], input);
     const description = interpolateRoutineTemplate(input.routine.description, resolvedVariables);
     const triggerPayload = mergeRoutineRunPayload(input.payload, resolvedVariables);

@@ -31,6 +31,8 @@ Gateway connect identity fields:
 
 Request behavior fields:
 - payloadTemplate (object, optional): additional fields merged into gateway agent params
+- attachPaperclipPayload (boolean, optional): opt in to sending the standardized root-level paperclip payload for gateways that support it (default false)
+- includePaperclipPayload (boolean, optional): legacy alias for attachPaperclipPayload
 - workspaceRuntime (object, optional): reserved workspace runtime metadata; workspace runtime services are manually controlled from the workspace UI and are not auto-started by heartbeats
 - timeoutSec (number, optional): adapter timeout in seconds (default 120)
 - waitTimeoutMs (number, optional): agent.wait timeout override (default timeoutSec * 1000)
@@ -42,7 +44,7 @@ Session routing fields:
 - sessionKey (string, optional): fixed session key when strategy=fixed (default paperclip)
 
 Standard outbound payload additions:
-- paperclip (object): standardized Paperclip context added to every gateway agent request
+- paperclip (object): standardized Paperclip context added to every gateway agent request when attachPaperclipPayload=true
 - paperclip.workspace (object, optional): resolved execution workspace for this run
 - paperclip.workspaces (array, optional): additional workspace hints Paperclip exposed to the run
 - paperclip.workspaceRuntime (object, optional): reserved workspace runtime metadata when explicitly supplied outside normal heartbeat execution

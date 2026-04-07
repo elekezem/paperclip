@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UI_LANGUAGE_PREFERENCES } from "../constants.js";
 import { DEFAULT_FEEDBACK_DATA_SHARING_PREFERENCE } from "../types/feedback.js";
 import { feedbackDataSharingPreferenceSchema } from "./feedback.js";
 
@@ -8,6 +9,7 @@ export const instanceGeneralSettingsSchema = z.object({
   feedbackDataSharingPreference: feedbackDataSharingPreferenceSchema.default(
     DEFAULT_FEEDBACK_DATA_SHARING_PREFERENCE,
   ),
+  defaultUiLanguage: z.enum(UI_LANGUAGE_PREFERENCES).default("system"),
 }).strict();
 
 export const patchInstanceGeneralSettingsSchema = instanceGeneralSettingsSchema.partial();

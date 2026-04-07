@@ -36,6 +36,13 @@ import { PluginManager } from "./pages/PluginManager";
 import { PluginSettings } from "./pages/PluginSettings";
 import { AdapterManager } from "./pages/AdapterManager";
 import { PluginPage } from "./pages/PluginPage";
+import { ResearchPrograms } from "./pages/ResearchPrograms";
+import { ResearchStudies } from "./pages/ResearchStudies";
+import { ResearchRuns } from "./pages/ResearchRuns";
+import { ResearchArtifacts } from "./pages/ResearchArtifacts";
+import { ResearchLearning } from "./pages/ResearchLearning";
+import { ResearchGovernance } from "./pages/ResearchGovernance";
+import { ResearchGoldenStudies } from "./pages/ResearchGoldenStudies";
 import { RunTranscriptUxLab } from "./pages/RunTranscriptUxLab";
 import { OrgChart } from "./pages/OrgChart";
 import { NewAgent } from "./pages/NewAgent";
@@ -168,6 +175,13 @@ function boardRoutes() {
       <Route path="approvals/:approvalId" element={<ApprovalDetail />} />
       <Route path="costs" element={<Costs />} />
       <Route path="activity" element={<Activity />} />
+      <Route path="research/programs" element={<ResearchPrograms />} />
+      <Route path="research/governance" element={<ResearchGovernance />} />
+      <Route path="research/golden-studies" element={<ResearchGoldenStudies />} />
+      <Route path="research/studies" element={<ResearchStudies />} />
+      <Route path="research/runs" element={<ResearchRuns />} />
+      <Route path="research/artifacts" element={<ResearchArtifacts />} />
+      <Route path="research/learning" element={<ResearchLearning />} />
       <Route path="inbox" element={<InboxRootRedirect />} />
       <Route path="inbox/mine" element={<Inbox />} />
       <Route path="inbox/recent" element={<Inbox />} />

@@ -105,6 +105,16 @@ export const queryKeys = {
   },
   dashboard: (companyId: string) => ["dashboard", companyId] as const,
   sidebarBadges: (companyId: string) => ["sidebar-badges", companyId] as const,
+  research: {
+    missionControl: (companyId: string) => ["research", companyId, "mission-control"] as const,
+    governance: (companyId: string) => ["research", companyId, "governance"] as const,
+    programs: (companyId: string) => ["research", companyId, "programs"] as const,
+    studies: (companyId: string) => ["research", companyId, "studies"] as const,
+    runs: (companyId: string) => ["research", companyId, "runs"] as const,
+    artifacts: (companyId: string) => ["research", companyId, "artifacts"] as const,
+    learning: (companyId: string) => ["research", companyId, "learning"] as const,
+    goldenStudies: (companyId: string) => ["research", companyId, "golden-studies"] as const,
+  },
   activity: (companyId: string) => ["activity", companyId] as const,
   costs: (companyId: string, from?: string, to?: string) =>
     ["costs", companyId, from, to] as const,

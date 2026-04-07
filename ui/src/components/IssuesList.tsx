@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@/lib/router";
 import { pickTextColorForPillBg } from "@/lib/color-contrast";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
@@ -15,6 +16,7 @@ import { PriorityIcon } from "./PriorityIcon";
 import { EmptyState } from "./EmptyState";
 import { Identity } from "./Identity";
 import { IssueRow } from "./IssueRow";
+import { ExecutionWorkspaceChip } from "./ExecutionWorkspaceChip";
 import { PageSkeleton } from "./PageSkeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +25,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { CircleDot, Plus, Filter, ArrowUpDown, Layers, Check, X, ChevronRight, List, Columns3, User, Search } from "lucide-react";
 import { KanbanBoard } from "./KanbanBoard";
-import type { Issue } from "@paperclipai/shared";
+import type { ExecutionWorkspace, Issue } from "@paperclipai/shared";
 
 /* ── Helpers ── */
 
@@ -172,6 +174,7 @@ interface IssuesListProps {
   error?: Error | null;
   agents?: Agent[];
   projects?: ProjectOption[];
+  executionWorkspaces?: ExecutionWorkspace[];
   liveIssueIds?: Set<string>;
   projectId?: string;
   viewStateKey: string;
@@ -191,6 +194,7 @@ export function IssuesList({
   error,
   agents,
   projects,
+  executionWorkspaces,
   liveIssueIds,
   projectId,
   viewStateKey,
@@ -203,6 +207,7 @@ export function IssuesList({
 }: IssuesListProps) {
   const { selectedCompanyId } = useCompany();
   const { openNewIssue } = useDialog();
+  const navigate = useNavigate();
   const { data: session } = useQuery({
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
@@ -266,6 +271,27 @@ export function IssuesList({
   });
 
   const activeFilterCount = countActiveFilters(viewState);
+  const executionWorkspaceById = useMemo(() => {
+    const map = new Map<string, ExecutionWorkspace>();
+    for (const workspace of executionWorkspaces ?? []) {
+      map.set(workspace.id, workspace);
+    }
+    return map;
+  }, [executionWorkspaces]);
+  const executionWorkspaceIssueCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const issue of issues) {
+      const workspaceId = issue.currentExecutionWorkspace?.id ?? issue.executionWorkspaceId;
+      if (!workspaceId) continue;
+      counts.set(workspaceId, (counts.get(workspaceId) ?? 0) + 1);
+    }
+    return counts;
+  }, [issues]);
+  const workspaceForIssue = useCallback((issue: Issue) => {
+    if (issue.currentExecutionWorkspace) return issue.currentExecutionWorkspace;
+    if (!issue.executionWorkspaceId) return null;
+    return executionWorkspaceById.get(issue.executionWorkspaceId) ?? null;
+  }, [executionWorkspaceById]);
 
   const groupedContent = useMemo(() => {
     if (viewState.groupBy === "none") {
@@ -363,29 +389,18 @@ export function IssuesList({
           </div>
         )}
         <CollapsibleContent>
-          {group.items.map((issue) => (
-            <IssueRow
-              key={issue.id}
-              issue={issue}
-              issueLinkState={issueLinkState}
-              desktopLeadingSpacer
-              mobileLeading={(
-                <span
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                >
-                  <StatusIcon
-                    status={issue.status}
-                    onChange={(s) => onUpdateIssue(issue.id, { status: s })}
-                  />
-                </span>
-              )}
-              desktopMetaLeading={(
-                <>
+          {group.items.map((issue) => {
+            const workspace = workspaceForIssue(issue);
+            const linkedIssueCount = workspace ? (executionWorkspaceIssueCounts.get(workspace.id) ?? 0) : 0;
+
+            return (
+              <IssueRow
+                key={issue.id}
+                issue={issue}
+                issueLinkState={issueLinkState}
+                desktopLeadingSpacer
+                mobileLeading={(
                   <span
-                    className="hidden shrink-0 sm:inline-flex"
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -396,25 +411,53 @@ export function IssuesList({
                       onChange={(s) => onUpdateIssue(issue.id, { status: s })}
                     />
                   </span>
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                    {issue.identifier ?? issue.id.slice(0, 8)}
-                  </span>
-                  {liveIssueIds?.has(issue.id) && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 sm:gap-1.5 sm:px-2">
-                      <span className="relative flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-blue-400 opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
-                      </span>
-                      <span className="hidden text-[11px] font-medium text-blue-600 dark:text-blue-400 sm:inline">
-                        Live
-                      </span>
+                )}
+                desktopMetaLeading={(
+                  <>
+                    <span
+                      className="hidden shrink-0 sm:inline-flex"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                    >
+                      <StatusIcon
+                        status={issue.status}
+                        onChange={(s) => onUpdateIssue(issue.id, { status: s })}
+                      />
                     </span>
-                  )}
-                </>
-              )}
-              mobileMeta={timeAgo(issue.updatedAt)}
-              desktopTrailing={(
-                <>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                      {issue.identifier ?? issue.id.slice(0, 8)}
+                    </span>
+                    {liveIssueIds?.has(issue.id) && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 sm:gap-1.5 sm:px-2">
+                        <span className="relative flex h-2 w-2">
+                          <span className="absolute inline-flex h-full w-full animate-pulse rounded-full bg-blue-400 opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+                        </span>
+                        <span className="hidden text-[11px] font-medium text-blue-600 dark:text-blue-400 sm:inline">
+                          Live
+                        </span>
+                      </span>
+                    )}
+                    {workspace ? (
+                      <ExecutionWorkspaceChip
+                        workspace={workspace}
+                        linkedIssueCount={linkedIssueCount}
+                        compact
+                        className="hidden lg:inline-flex"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          navigate(`/execution-workspaces/${workspace.id}`);
+                        }}
+                      />
+                    ) : null}
+                  </>
+                )}
+                mobileMeta={timeAgo(issue.updatedAt)}
+                desktopTrailing={(
+                  <>
                   {(issue.labels ?? []).length > 0 && (
                     <span className="hidden items-center gap-1 overflow-hidden md:flex md:max-w-[240px]">
                       {(issue.labels ?? []).slice(0, 3).map((label) => (
@@ -542,9 +585,10 @@ export function IssuesList({
                   </Popover>
                 </>
               )}
-              trailingMeta={formatDate(issue.createdAt)}
-            />
-          ))}
+                trailingMeta={formatDate(issue.createdAt)}
+              />
+            );
+          })}
         </CollapsibleContent>
       </Collapsible>
     ));
@@ -555,15 +599,18 @@ export function IssuesList({
     assigneeSearch,
     assignIssue,
     currentUserId,
+    executionWorkspaceIssueCounts,
     filtered,
     groupedContent,
     issueLinkState,
     liveIssueIds,
+    navigate,
     newIssueDefaults,
     onUpdateIssue,
     openNewIssue,
     updateView,
     viewState.collapsedGroups,
+    workspaceForIssue,
   ]);
 
   return (

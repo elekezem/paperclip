@@ -5,6 +5,7 @@ import { issuesApi } from "../api/issues";
 import { agentsApi } from "../api/agents";
 import { projectsApi } from "../api/projects";
 import { heartbeatsApi } from "../api/heartbeats";
+import { executionWorkspacesApi } from "../api/execution-workspaces";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { queryKeys } from "../lib/queryKeys";
@@ -47,6 +48,11 @@ export function Issues() {
   const { data: projects } = useQuery({
     queryKey: queryKeys.projects.list(selectedCompanyId!),
     queryFn: () => projectsApi.list(selectedCompanyId!),
+    enabled: !!selectedCompanyId,
+  });
+  const { data: executionWorkspaces } = useQuery({
+    queryKey: queryKeys.executionWorkspaces.list(selectedCompanyId!),
+    queryFn: () => executionWorkspacesApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId,
   });
 
@@ -104,6 +110,7 @@ export function Issues() {
       error={error as Error | null}
       agents={agents}
       projects={projects}
+      executionWorkspaces={executionWorkspaces}
       liveIssueIds={liveIssueIds}
       viewStateKey="paperclip:issues-view"
       issueLinkState={issueLinkState}

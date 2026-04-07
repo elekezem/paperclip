@@ -133,15 +133,27 @@ function normalizeSessionKeyStrategy(value: unknown): SessionKeyStrategy {
   return "issue";
 }
 
+function toAgentScopedSessionKey(agentKey: string | null, sessionKey: string): string {
+  const trimmed = sessionKey.trim();
+  if (!trimmed) return agentKey ? `agent:${agentKey}:paperclip` : "paperclip";
+  if (trimmed.toLowerCase().startsWith("agent:")) return trimmed;
+  return agentKey ? `agent:${agentKey}:${trimmed}` : trimmed;
+}
+
 function resolveSessionKey(input: {
   strategy: SessionKeyStrategy;
   configuredSessionKey: string | null;
   runId: string;
   issueId: string | null;
+  agentKey: string | null;
 }): string {
-  const fallback = input.configuredSessionKey ?? "paperclip";
-  if (input.strategy === "run") return `paperclip:run:${input.runId}`;
-  if (input.strategy === "issue" && input.issueId) return `paperclip:issue:${input.issueId}`;
+  const fallback = toAgentScopedSessionKey(input.agentKey, input.configuredSessionKey ?? "paperclip");
+  if (input.strategy === "run") {
+    return toAgentScopedSessionKey(input.agentKey, `paperclip:run:${input.runId}`);
+  }
+  if (input.strategy === "issue" && input.issueId) {
+    return toAgentScopedSessionKey(input.agentKey, `paperclip:issue:${input.issueId}`);
+  }
   return fallback;
 }
 
@@ -1065,6 +1077,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const payloadTemplate = parseObject(ctx.config.payloadTemplate);
   const transportHint = nonEmpty(ctx.config.streamTransport) ?? nonEmpty(ctx.config.transport);
+  const attachPaperclipPayload =
+    parseBoolean(ctx.config.attachPaperclipPayload, false)
+    || parseBoolean(ctx.config.includePaperclipPayload, false);
 
   const headers = toStringRecord(ctx.config.headers);
   const authToken = resolveAuthToken(parseObject(ctx.config), headers);
@@ -1097,17 +1112,17 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const sessionKeyStrategy = normalizeSessionKeyStrategy(ctx.config.sessionKeyStrategy);
   const configuredSessionKey = nonEmpty(ctx.config.sessionKey);
+  const configuredAgentId = nonEmpty(ctx.config.agentId);
   const sessionKey = resolveSessionKey({
     strategy: sessionKeyStrategy,
     configuredSessionKey,
     runId: ctx.runId,
     issueId: wakePayload.issueId,
+    agentKey: configuredAgentId ?? ctx.agent.id,
   });
 
   const templateMessage = nonEmpty(payloadTemplate.message) ?? nonEmpty(payloadTemplate.text);
   const message = templateMessage ? appendWakeText(templateMessage, wakeText) : wakeText;
-  const paperclipPayload = buildStandardPaperclipPayload(ctx, wakePayload, paperclipEnv, payloadTemplate);
-
   const agentParams: Record<string, unknown> = {
     ...payloadTemplate,
     message,
@@ -1115,9 +1130,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     idempotencyKey: ctx.runId,
   };
   delete agentParams.text;
-  agentParams.paperclip = paperclipPayload;
+  if (attachPaperclipPayload) {
+    const paperclipPayload = buildStandardPaperclipPayload(ctx, wakePayload, paperclipEnv, payloadTemplate);
+    agentParams.paperclip = paperclipPayload;
+  }
 
-  const configuredAgentId = nonEmpty(ctx.config.agentId);
   if (configuredAgentId && !nonEmpty(agentParams.agentId)) {
     agentParams.agentId = configuredAgentId;
   }

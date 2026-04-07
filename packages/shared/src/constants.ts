@@ -197,7 +197,20 @@ export const PROJECT_COLORS = [
   "#3b82f6", // blue
 ] as const;
 
-export const APPROVAL_TYPES = ["hire_agent", "approve_ceo_strategy", "budget_override_required"] as const;
+export const UI_LANGUAGE_PREFERENCES = ["system", "en", "zh-CN"] as const;
+export type UiLanguagePreference = (typeof UI_LANGUAGE_PREFERENCES)[number];
+
+export const APPROVAL_TYPES = [
+  "hire_agent",
+  "approve_ceo_strategy",
+  "budget_override_required",
+  "content_publish_release",
+  "proposal_review",
+  "survey_review",
+  "study_launch",
+  "compute_budget_raise",
+  "paper_release",
+] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
 export const APPROVAL_STATUSES = [

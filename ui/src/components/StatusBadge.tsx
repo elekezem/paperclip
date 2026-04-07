@@ -1,7 +1,10 @@
 import { cn } from "../lib/utils";
+import { useI18n } from "../context/LocaleContext";
 import { statusBadge, statusBadgeDefault } from "../lib/status-colors";
 
 export function StatusBadge({ status }: { status: string }) {
+  const { formatStatus } = useI18n();
+
   return (
     <span
       className={cn(
@@ -9,7 +12,7 @@ export function StatusBadge({ status }: { status: string }) {
         statusBadge[status] ?? statusBadgeDefault
       )}
     >
-      {status.replace("_", " ")}
+      {formatStatus(status)}
     </span>
   );
 }

@@ -37,6 +37,7 @@ describe("instance settings routes", () => {
       censorUsernameInLogs: false,
       keyboardShortcuts: false,
       feedbackDataSharingPreference: "prompt",
+      defaultUiLanguage: "system",
     });
     mockInstanceSettingsService.getExperimental.mockResolvedValue({
       enableIsolatedWorkspaces: false,
@@ -48,6 +49,7 @@ describe("instance settings routes", () => {
         censorUsernameInLogs: true,
         keyboardShortcuts: true,
         feedbackDataSharingPreference: "allowed",
+        defaultUiLanguage: "zh-CN",
       },
     });
     mockInstanceSettingsService.updateExperimental.mockResolvedValue({
@@ -118,6 +120,7 @@ describe("instance settings routes", () => {
       censorUsernameInLogs: false,
       keyboardShortcuts: false,
       feedbackDataSharingPreference: "prompt",
+      defaultUiLanguage: "system",
     });
 
     const patchRes = await request(app)
@@ -126,6 +129,7 @@ describe("instance settings routes", () => {
         censorUsernameInLogs: true,
         keyboardShortcuts: true,
         feedbackDataSharingPreference: "allowed",
+        defaultUiLanguage: "zh-CN",
       });
 
     expect(patchRes.status).toBe(200);
@@ -133,6 +137,7 @@ describe("instance settings routes", () => {
       censorUsernameInLogs: true,
       keyboardShortcuts: true,
       feedbackDataSharingPreference: "allowed",
+      defaultUiLanguage: "zh-CN",
     });
     expect(mockLogActivity).toHaveBeenCalledTimes(2);
   });

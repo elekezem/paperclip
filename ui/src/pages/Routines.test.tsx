@@ -30,6 +30,22 @@ vi.mock("../context/BreadcrumbContext", () => ({
   useBreadcrumbs: () => ({ setBreadcrumbs: vi.fn() }),
 }));
 
+vi.mock("../context/LocaleContext", () => ({
+  useI18n: () => ({
+    t: (key: string, values?: Record<string, string | number>) => {
+      if (key === "routines.lastRunStatus" && values) {
+        return `${values.time} · ${values.status}`;
+      }
+      if (key === "routines.count" && values) {
+        return `${values.count} routines`;
+      }
+      return key;
+    },
+    formatStatus: (value: string) => value.replaceAll("_", " "),
+    formatDateTime: (value: Date | string) => new Date(value).toLocaleString(),
+  }),
+}));
+
 vi.mock("../context/ToastContext", () => ({
   useToast: () => ({ pushToast: vi.fn() }),
 }));
@@ -327,6 +343,12 @@ describe("Routines page", () => {
         ["agent-1", { name: "Agent One" }],
         ["agent-2", { name: "Agent Two" }],
       ]),
+      {
+        noProject: "No project",
+        unknownProject: "Unknown project",
+        unassigned: "Unassigned",
+        unknownAgent: "Unknown agent",
+      },
     );
 
     expect(groups.map((group) => group.label)).toEqual(["Project Alpha", "Project Beta"]);
