@@ -6,10 +6,13 @@ import {
   assets,
   companies,
   companyMemberships,
+  costEvents,
   documents,
   goals,
   heartbeatRuns,
   executionWorkspaces,
+  feedbackVotes,
+  financeEvents,
   issueAttachments,
   issueInboxArchives,
   issueLabels,
@@ -1343,6 +1346,31 @@ export function issueService(db: Db) {
           .select({ documentId: issueDocuments.documentId })
           .from(issueDocuments)
           .where(eq(issueDocuments.issueId, id));
+
+        await tx
+          .update(issues)
+          .set({ parentId: null })
+          .where(eq(issues.parentId, id));
+        await tx
+          .update(costEvents)
+          .set({ issueId: null })
+          .where(eq(costEvents.issueId, id));
+        await tx
+          .update(financeEvents)
+          .set({ issueId: null })
+          .where(eq(financeEvents.issueId, id));
+        await tx
+          .delete(feedbackVotes)
+          .where(eq(feedbackVotes.issueId, id));
+        await tx
+          .delete(issueInboxArchives)
+          .where(eq(issueInboxArchives.issueId, id));
+        await tx
+          .delete(issueReadStates)
+          .where(eq(issueReadStates.issueId, id));
+        await tx
+          .delete(issueComments)
+          .where(eq(issueComments.issueId, id));
 
         const removedIssue = await tx
           .delete(issues)
