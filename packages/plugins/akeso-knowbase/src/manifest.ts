@@ -10,6 +10,8 @@ const DEFAULT_CONFIG = {
 };
 const TOOL_NAMES = {
   search: "search",
+  path: "path",
+  explain: "explain",
   packContext: "pack_context",
   createBrief: "create_brief",
   compileIssueContext: "compile_issue_context",
@@ -73,6 +75,37 @@ const manifest: PaperclipPluginManifestV1 = {
           privateOnly: { type: "boolean", default: false },
         },
         required: ["query"],
+      },
+    },
+    {
+      name: TOOL_NAMES.path,
+      displayName: "KNOWBASE Path",
+      description: "Find the strongest visible graph path between two refs inside the company-private graph plus optional shared public canon.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          fromRef: { type: "string" },
+          toRef: { type: "string" },
+          company: { type: "string" },
+          maxDepth: { type: "integer", minimum: 1, maximum: 12, default: 6 },
+          privateOnly: { type: "boolean", default: false },
+        },
+        required: ["fromRef", "toRef"],
+      },
+    },
+    {
+      name: TOOL_NAMES.explain,
+      displayName: "KNOWBASE Explain",
+      description: "Explain a ref's graph neighborhood, community tags, and edge evidence inside the company-private graph plus optional shared public canon.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          ref: { type: "string" },
+          company: { type: "string" },
+          limit: { type: "integer", minimum: 1, maximum: 20, default: 8 },
+          privateOnly: { type: "boolean", default: false },
+        },
+        required: ["ref"],
       },
     },
     {

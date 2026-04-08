@@ -21,6 +21,21 @@ export type SearchArgs = {
   privateOnly?: boolean;
 };
 
+export type PathArgs = {
+  fromRef: string;
+  toRef: string;
+  company: string;
+  maxDepth?: number;
+  privateOnly?: boolean;
+};
+
+export type ExplainArgs = {
+  ref: string;
+  company: string;
+  limit?: number;
+  privateOnly?: boolean;
+};
+
 export type PackContextArgs = {
   query: string;
   company: string;
@@ -61,6 +76,8 @@ export type HealthCheckResult = {
 
 export interface KnowbaseRuntime {
   search(config: KnowbasePluginConfig, args: SearchArgs): Promise<unknown[]>;
+  path(config: KnowbasePluginConfig, args: PathArgs): Promise<Record<string, unknown>>;
+  explain(config: KnowbasePluginConfig, args: ExplainArgs): Promise<Record<string, unknown>>;
   packContext(config: KnowbasePluginConfig, args: PackContextArgs): Promise<Record<string, unknown>>;
   createBrief(config: KnowbasePluginConfig, args: CreateBriefArgs): Promise<{ outputPath: string; markdown: string }>;
   compileIssueContext(config: KnowbasePluginConfig, args: CompileIssueContextArgs): Promise<Record<string, unknown>>;
@@ -185,6 +202,41 @@ export function createCliRuntime(): KnowbaseRuntime {
       ];
       appendBooleanFlag(command, "--private-only", args.privateOnly);
       return parseJson<unknown[]>(await runCommand(config, command), "search");
+    },
+
+    async path(config, args) {
+      const command = [
+        "run",
+        "knowbase",
+        "path",
+        args.fromRef,
+        args.toRef,
+        "--project-root",
+        config.knowbaseProjectRoot,
+        "--company",
+        args.company,
+        "--max-depth",
+        String(args.maxDepth ?? 6),
+      ];
+      appendBooleanFlag(command, "--private-only", args.privateOnly);
+      return parseJson<Record<string, unknown>>(await runCommand(config, command), "path");
+    },
+
+    async explain(config, args) {
+      const command = [
+        "run",
+        "knowbase",
+        "explain",
+        args.ref,
+        "--project-root",
+        config.knowbaseProjectRoot,
+        "--company",
+        args.company,
+        "--limit",
+        String(args.limit ?? 8),
+      ];
+      appendBooleanFlag(command, "--private-only", args.privateOnly);
+      return parseJson<Record<string, unknown>>(await runCommand(config, command), "explain");
     },
 
     async packContext(config, args) {

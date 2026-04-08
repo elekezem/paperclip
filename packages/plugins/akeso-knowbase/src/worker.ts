@@ -23,6 +23,23 @@ function summarizeSearchResult(rows: Array<Record<string, unknown>>): string {
     .join("\n");
 }
 
+function summarizePathResult(result: Record<string, unknown>): string {
+  if (result.found !== true) {
+    return `No visible graph path found. reason=${String(result.reason ?? "unknown")}`;
+  }
+  const nodes = Array.isArray(result.nodes) ? result.nodes.length : 0;
+  const cost = typeof result.cost === "number" ? result.cost.toFixed(2) : "n/a";
+  return `Found graph path with ${nodes} nodes. weighted-cost=${cost}.`;
+}
+
+function summarizeExplainResult(result: Record<string, unknown>): string {
+  const nodes = Array.isArray(result.nodes) ? result.nodes.length : 0;
+  if (nodes === 0) return "No visible graph explanation was found.";
+  const top = (result.nodes as Array<Record<string, unknown>>)[0] ?? {};
+  const topTitle = typeof top.title === "string" ? top.title : "untitled";
+  return `Explained ${nodes} graph nodes around ${topTitle}.`;
+}
+
 function summarizeContextPack(pack: Record<string, unknown>): string {
   const refs = Array.isArray(pack.refs) ? pack.refs.length : 0;
   const hits = Array.isArray(pack.hits) ? pack.hits.length : 0;
@@ -56,6 +73,45 @@ async function registerTools(ctx: PluginContext, runtime: KnowbaseRuntime): Prom
       return {
         content: summarizeSearchResult(result as Array<Record<string, unknown>>),
         data: { company, hits: result },
+      };
+    },
+  );
+
+  ctx.tools.register(
+    TOOL_NAMES.path,
+    manifest.tools!.find((tool) => tool.name === TOOL_NAMES.path)!,
+    async (params, runCtx): Promise<ToolResult> => {
+      const config = await resolvePluginConfig(ctx);
+      const company = await resolveCompanyName(ctx, runCtx, (params as { company?: string }).company);
+      const result = await runtime.path(config, {
+        fromRef: String((params as { fromRef: string }).fromRef),
+        toRef: String((params as { toRef: string }).toRef),
+        company,
+        maxDepth: Number((params as { maxDepth?: number }).maxDepth ?? 6),
+        privateOnly: Boolean((params as { privateOnly?: boolean }).privateOnly),
+      });
+      return {
+        content: summarizePathResult(result),
+        data: { company, ...result },
+      };
+    },
+  );
+
+  ctx.tools.register(
+    TOOL_NAMES.explain,
+    manifest.tools!.find((tool) => tool.name === TOOL_NAMES.explain)!,
+    async (params, runCtx): Promise<ToolResult> => {
+      const config = await resolvePluginConfig(ctx);
+      const company = await resolveCompanyName(ctx, runCtx, (params as { company?: string }).company);
+      const result = await runtime.explain(config, {
+        ref: String((params as { ref: string }).ref),
+        company,
+        limit: Number((params as { limit?: number }).limit ?? 8),
+        privateOnly: Boolean((params as { privateOnly?: boolean }).privateOnly),
+      });
+      return {
+        content: summarizeExplainResult(result),
+        data: { company, ...result },
       };
     },
   );
@@ -171,7 +227,7 @@ export function createKnowbasePlugin(runtime: KnowbaseRuntime = createCliRuntime
     async onHealth() {
       const ctx = currentContext;
       if (!ctx) {
-        return { status: "warn", message: "Plugin context is not initialized yet." };
+        return { status: "degraded", message: "Plugin context is not initialized yet." };
       }
       const config = await resolvePluginConfig(ctx);
       const validation = validateConfig(config);

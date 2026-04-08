@@ -10,10 +10,11 @@ export const DEFAULT_CONFIG = {
 
 export const TOOL_NAMES = {
   search: "search",
+  path: "path",
+  explain: "explain",
   packContext: "pack_context",
   createBrief: "create_brief",
   compileIssueContext: "compile_issue_context",
   runHealthCheck: "run_health_check",
   promoteToPublicCanon: "promote_to_public_canon",
 } as const;
-
