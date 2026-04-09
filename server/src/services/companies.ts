@@ -113,6 +113,10 @@ export function companyService(db: Db) {
     return normalized.slice(0, 3) || ISSUE_PREFIX_FALLBACK;
   }
 
+  function normalizeRequestedIssuePrefix(issuePrefix: string) {
+    return issuePrefix.trim().toUpperCase();
+  }
+
   function suffixForAttempt(attempt: number) {
     if (attempt <= 1) return "";
     return "A".repeat(attempt - 1);
@@ -132,6 +136,24 @@ export function companyService(db: Db) {
   }
 
   async function createCompanyWithUniquePrefix(data: typeof companies.$inferInsert) {
+    const requestedPrefix = typeof data.issuePrefix === "string" && data.issuePrefix.trim().length > 0
+      ? normalizeRequestedIssuePrefix(data.issuePrefix)
+      : null;
+    if (requestedPrefix) {
+      try {
+        const rows = await db
+          .insert(companies)
+          .values({ ...data, issuePrefix: requestedPrefix })
+          .returning();
+        return rows[0];
+      } catch (error) {
+        if (isIssuePrefixConflict(error)) {
+          throw unprocessable(`Company issue prefix '${requestedPrefix}' is already in use`);
+        }
+        throw error;
+      }
+    }
+
     const base = deriveIssuePrefixBase(data.name);
     let suffix = 1;
     while (suffix < 10000) {
