@@ -1,0 +1,48 @@
+diff --git a/dist/server/execute.js b/dist/server/execute.js
+--- a/dist/server/execute.js
++++ b/dist/server/execute.js
+@@ -18,7 +18,7 @@
+  *   --source           session source tag for filtering
+  */
+ import { runChildProcess, buildPaperclipEnv, renderTemplate, ensureAbsoluteDirectory, } from "@paperclipai/adapter-utils/server-utils";
+-import { HERMES_CLI, DEFAULT_TIMEOUT_SEC, DEFAULT_GRACE_SEC, DEFAULT_MODEL, } from "../shared/constants.js";
++import { HERMES_CLI, DEFAULT_TIMEOUT_SEC, DEFAULT_GRACE_SEC, } from "../shared/constants.js";
+ import { detectModel, resolveProvider, } from "./detect-model.js";
+ // ---------------------------------------------------------------------------
+ // Config helpers
+@@ -247,7 +247,7 @@
+     const config = (ctx.agent?.adapterConfig ?? {});
+     // ── Resolve configuration ──────────────────────────────────────────────
+     const hermesCmd = cfgString(config.hermesCommand) || HERMES_CLI;
+-    const model = cfgString(config.model) || DEFAULT_MODEL;
++    const model = cfgString(config.model);
+     const timeoutSec = cfgNumber(config.timeoutSec) || DEFAULT_TIMEOUT_SEC;
+     const graceSec = cfgNumber(config.graceSec) || DEFAULT_GRACE_SEC;
+     const maxTurns = cfgNumber(config.maxTurnsPerRun);
+@@ -320,7 +320,8 @@
+     // system is designed for human-attended interactive sessions.
+     args.push("--yolo");
+     // Session resume
+-    const prevSessionId = cfgString(ctx.runtime?.sessionParams?.sessionId);
++    const prevSessionId = cfgString(ctx.runtime?.sessionParams?.sessionId) ||
++        cfgString(ctx.runtime?.sessionId);
+     if (persistSession && prevSessionId) {
+         args.push("--resume", prevSessionId);
+     }
+@@ -350,7 +351,8 @@
+         // Non-fatal
+     }
+     // ── Log start ──────────────────────────────────────────────────────────
+-    await ctx.onLog("stdout", `[hermes] Starting Hermes Agent (model=${model}, provider=${resolvedProvider} [${resolvedFrom}], timeout=${timeoutSec}s${maxTurns ? `, max_turns=${maxTurns}` : ""})\n`);
++    const modelLabel = model || "hermes-configured-default";
++    await ctx.onLog("stdout", `[hermes] Starting Hermes Agent (model=${modelLabel}, provider=${resolvedProvider} [${resolvedFrom}], timeout=${timeoutSec}s${maxTurns ? `, max_turns=${maxTurns}` : ""})\n`);
+     if (prevSessionId) {
+         await ctx.onLog("stdout", `[hermes] Resuming session: ${prevSessionId}\n`);
+     }
+@@ -425,4 +427,4 @@
+     }
+     return executionResult;
+ }
+-//# sourceMappingURL=execute.js.map
+\ No newline at end of file
++//# sourceMappingURL=execute.js.map
