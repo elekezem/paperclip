@@ -27,6 +27,13 @@ function isNonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function stripOpenAiApiKey(env: Record<string, string>): Record<string, string> {
+  if (!isNonEmpty(env.OPENAI_API_KEY)) return env;
+  const sanitized = { ...env };
+  delete sanitized.OPENAI_API_KEY;
+  return sanitized;
+}
+
 function firstNonEmptyLine(text: string): string {
   return (
     text
@@ -81,7 +88,7 @@ export async function testEnvironment(
   for (const [key, value] of Object.entries(envConfig)) {
     if (typeof value === "string") env[key] = value;
   }
-  const runtimeEnv = ensurePathInEnv({ ...process.env, ...env });
+  const runtimeEnv = ensurePathInEnv(stripOpenAiApiKey({ ...process.env, ...env }));
   try {
     await ensureCommandResolvable(command, cwd, runtimeEnv);
     checks.push({
@@ -103,29 +110,29 @@ export async function testEnvironment(
   if (isNonEmpty(configOpenAiKey) || isNonEmpty(hostOpenAiKey)) {
     const source = isNonEmpty(configOpenAiKey) ? "adapter config env" : "server environment";
     checks.push({
-      code: "codex_openai_api_key_present",
+      code: "codex_openai_api_key_ignored",
       level: "info",
-      message: "OPENAI_API_KEY is set for Codex authentication.",
+      message: "OPENAI_API_KEY is set, but Codex local ignores it to preserve subscription routing.",
       detail: `Detected in ${source}.`,
+      hint: "Remove OPENAI_API_KEY from the Codex runtime if you no longer need legacy OpenAI Platform API flows.",
+    });
+  }
+  const codexHome = isNonEmpty(env.CODEX_HOME) ? env.CODEX_HOME : undefined;
+  const codexAuth = await readCodexAuthInfo(codexHome).catch(() => null);
+  if (codexAuth) {
+    checks.push({
+      code: "codex_native_auth_present",
+      level: "info",
+      message: "Codex is authenticated via its own auth configuration.",
+      detail: codexAuth.email ? `Logged in as ${codexAuth.email}.` : `Credentials found in ${path.join(codexHome ?? codexHomeDir(), "auth.json")}.`,
     });
   } else {
-    const codexHome = isNonEmpty(env.CODEX_HOME) ? env.CODEX_HOME : undefined;
-    const codexAuth = await readCodexAuthInfo(codexHome).catch(() => null);
-    if (codexAuth) {
-      checks.push({
-        code: "codex_native_auth_present",
-        level: "info",
-        message: "Codex is authenticated via its own auth configuration.",
-        detail: codexAuth.email ? `Logged in as ${codexAuth.email}.` : `Credentials found in ${path.join(codexHome ?? codexHomeDir(), "auth.json")}.`,
-      });
-    } else {
-      checks.push({
-        code: "codex_openai_api_key_missing",
-        level: "warn",
-        message: "OPENAI_API_KEY is not set. Codex runs may fail until authentication is configured.",
-        hint: "Set OPENAI_API_KEY in adapter env, shell environment, or run `codex auth` to log in.",
-      });
-    }
+    checks.push({
+      code: "codex_native_auth_missing",
+      level: "warn",
+      message: "Codex native auth is not configured. Codex runs may fail until `codex login` completes.",
+      hint: "Run `codex login` to authenticate with ChatGPT/Codex OAuth, then retry the probe.",
+    });
   }
 
   const canRunProbe =
@@ -172,7 +179,7 @@ export async function testEnvironment(
         args,
         {
           cwd,
-          env,
+          env: stripOpenAiApiKey(env),
           timeoutSec: 45,
           graceSec: 5,
           stdin: "Respond with hello.",
@@ -212,7 +219,7 @@ export async function testEnvironment(
           level: "warn",
           message: "Codex CLI is installed, but authentication is not ready.",
           ...(detail ? { detail } : {}),
-          hint: "Configure OPENAI_API_KEY in adapter env/shell or run `codex login`, then retry the probe.",
+          hint: "Run `codex login` to restore ChatGPT/Codex OAuth, then retry the probe.",
         });
       } else {
         checks.push({

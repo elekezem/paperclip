@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inferOpenAiCompatibleBiller, type AdapterExecutionContext, type AdapterExecutionResult } from "@paperclipai/adapter-utils";
+import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import {
   asString,
   asNumber,
@@ -60,15 +60,19 @@ function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean 
   return typeof raw === "string" && raw.trim().length > 0;
 }
 
-function resolveCodexBillingType(env: Record<string, string>): "api" | "subscription" {
-  // Codex uses API-key auth when OPENAI_API_KEY is present; otherwise rely on local login/session auth.
-  return hasNonEmptyEnvValue(env, "OPENAI_API_KEY") ? "api" : "subscription";
+function stripOpenAiApiKey(env: Record<string, string>): Record<string, string> {
+  if (!hasNonEmptyEnvValue(env, "OPENAI_API_KEY")) return env;
+  const sanitized = { ...env };
+  delete sanitized.OPENAI_API_KEY;
+  return sanitized;
 }
 
-function resolveCodexBiller(env: Record<string, string>, billingType: "api" | "subscription"): string {
-  const openAiCompatibleBiller = inferOpenAiCompatibleBiller(env, "openai");
-  if (openAiCompatibleBiller === "openrouter") return "openrouter";
-  return billingType === "subscription" ? "chatgpt" : openAiCompatibleBiller ?? "openai";
+function resolveCodexBillingType(): "subscription" {
+  return "subscription";
+}
+
+function resolveCodexBiller(): string {
+  return "chatgpt";
 }
 
 async function isLikelyPaperclipRepoRoot(candidate: string): Promise<boolean> {
@@ -379,15 +383,20 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   for (const [k, v] of Object.entries(envConfig)) {
     if (typeof v === "string") env[k] = v;
   }
+  const strippedOpenAiApiKey =
+    hasNonEmptyEnvValue(env, "OPENAI_API_KEY") ||
+    (typeof process.env.OPENAI_API_KEY === "string" && process.env.OPENAI_API_KEY.trim().length > 0);
+  delete env.OPENAI_API_KEY;
   if (!hasExplicitApiKey && authToken) {
     env.PAPERCLIP_API_KEY = authToken;
   }
-  const effectiveEnv = Object.fromEntries(
+  const mergedEnv = Object.fromEntries(
     Object.entries({ ...process.env, ...env }).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string",
     ),
   );
-  const billingType = resolveCodexBillingType(effectiveEnv);
+  const effectiveEnv = stripOpenAiApiKey(mergedEnv);
+  const billingType = resolveCodexBillingType();
   const runtimeEnv = ensurePathInEnv(effectiveEnv);
   await ensureCommandResolvable(command, cwd, runtimeEnv);
   const resolvedCommand = await resolveCommandForLogs(command, cwd, runtimeEnv);
@@ -440,6 +449,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
   const repoAgentsNote =
     "Codex exec automatically applies repo-scoped AGENTS.md instructions from the current workspace; Paperclip does not currently suppress that discovery.";
+  const openAiApiKeyNote =
+    "Stripped OPENAI_API_KEY from the Codex runtime so runs stay on ChatGPT/Codex OAuth instead of OpenAI Platform API billing.";
   const bootstrapPromptTemplate = asString(config.bootstrapPromptTemplate, "");
   const templateData = {
     agentId: agent.id,
@@ -460,23 +471,29 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   instructionsChars = promptInstructionsPrefix.length;
   const commandNotes = (() => {
     if (!instructionsFilePath) {
-      return [repoAgentsNote];
+      return [
+        ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
+        repoAgentsNote,
+      ];
     }
     if (instructionsPrefix.length > 0) {
       if (shouldUseResumeDeltaPrompt) {
         return [
+          ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
           `Loaded agent instructions from ${instructionsFilePath}`,
           "Skipped stdin instruction reinjection because an existing Codex session is being resumed with a wake delta.",
           repoAgentsNote,
         ];
       }
       return [
+        ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
         `Loaded agent instructions from ${instructionsFilePath}`,
         `Prepended instructions + path directive to stdin prompt (relative references from ${instructionsDir}).`,
         repoAgentsNote,
       ];
     }
     return [
+      ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
       `Configured instructionsFilePath ${instructionsFilePath}, but file could not be read; continuing without injected instructions.`,
       repoAgentsNote,
     ];
@@ -532,7 +549,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     const proc = await runChildProcess(runId, command, args, {
       cwd,
-      env,
+      env: effectiveEnv,
       stdin: prompt,
       timeoutSec,
       graceSec,
@@ -602,7 +619,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       sessionParams: resolvedSessionParams,
       sessionDisplayId: resolvedSessionId,
       provider: "openai",
-      biller: resolveCodexBiller(effectiveEnv, billingType),
+      biller: resolveCodexBiller(),
       model,
       billingType,
       costUsd: null,

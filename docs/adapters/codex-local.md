@@ -8,7 +8,7 @@ The `codex_local` adapter runs OpenAI's Codex CLI locally. It supports session p
 ## Prerequisites
 
 - Codex CLI installed (`codex` command available)
-- `OPENAI_API_KEY` set in the environment or agent config
+- Codex authenticated via `codex login` with ChatGPT/Codex OAuth
 
 ## Configuration Fields
 
@@ -52,5 +52,6 @@ The environment test checks:
 
 - Codex CLI is installed and accessible
 - Working directory is absolute and available (auto-created if missing and permitted)
-- Authentication signal (`OPENAI_API_KEY` presence)
+- Native Codex auth availability (`~/.codex/auth.json` or configured `CODEX_HOME`)
+- Whether `OPENAI_API_KEY` is present and will be ignored for Codex subscription routing
 - A live hello probe (`codex exec --json -` with prompt `Respond with hello.`) to verify the CLI can actually run

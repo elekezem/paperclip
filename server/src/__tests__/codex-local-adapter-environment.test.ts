@@ -64,13 +64,13 @@ describe("codex_local environment diagnostics", () => {
       });
 
       expect(result.checks.some((check) => check.code === "codex_native_auth_present")).toBe(true);
-      expect(result.checks.some((check) => check.code === "codex_openai_api_key_missing")).toBe(false);
+      expect(result.checks.some((check) => check.code === "codex_native_auth_missing")).toBe(false);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
 
-  it("emits codex_openai_api_key_missing when neither env var nor native auth exists", async () => {
+  it("emits codex_native_auth_missing when no Codex auth file exists", async () => {
     const root = path.join(
       os.tmpdir(),
       `paperclip-codex-noauth-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -92,8 +92,40 @@ describe("codex_local environment diagnostics", () => {
         },
       });
 
-      expect(result.checks.some((check) => check.code === "codex_openai_api_key_missing")).toBe(true);
+      expect(result.checks.some((check) => check.code === "codex_native_auth_missing")).toBe(true);
       expect(result.checks.some((check) => check.code === "codex_native_auth_present")).toBe(false);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("emits codex_openai_api_key_ignored when OPENAI_API_KEY is present", async () => {
+    const root = path.join(
+      os.tmpdir(),
+      `paperclip-codex-api-key-ignored-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    );
+    const codexHome = path.join(root, ".codex");
+    const cwd = path.join(root, "workspace");
+
+    try {
+      await fs.mkdir(codexHome, { recursive: true });
+      await fs.writeFile(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({ accessToken: "fake-token", accountId: "acct-1" }),
+      );
+
+      const result = await testEnvironment({
+        companyId: "company-1",
+        adapterType: "codex_local",
+        config: {
+          command: process.execPath,
+          cwd,
+          env: { CODEX_HOME: codexHome, OPENAI_API_KEY: "test-key" },
+        },
+      });
+
+      expect(result.checks.some((check) => check.code === "codex_openai_api_key_ignored")).toBe(true);
+      expect(result.checks.some((check) => check.code === "codex_native_auth_present")).toBe(true);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -105,6 +137,7 @@ describe("codex_local environment diagnostics", () => {
       `paperclip-codex-local-probe-${Date.now()}-${Math.random().toString(16).slice(2)}`,
     );
     const binDir = path.join(root, "bin");
+    const codexHome = path.join(root, ".codex");
     const cwd = path.join(root, "workspace");
     const fakeCodex = path.join(binDir, "codex.cmd");
     const script = [
@@ -118,7 +151,12 @@ describe("codex_local environment diagnostics", () => {
 
     try {
       await fs.mkdir(binDir, { recursive: true });
+      await fs.mkdir(codexHome, { recursive: true });
       await fs.writeFile(fakeCodex, script, "utf8");
+      await fs.writeFile(
+        path.join(codexHome, "auth.json"),
+        JSON.stringify({ accessToken: "fake-token", accountId: "acct-1" }),
+      );
 
       const result = await testEnvironment({
         companyId: "company-1",
@@ -127,6 +165,7 @@ describe("codex_local environment diagnostics", () => {
           command: "codex",
           cwd,
           env: {
+            CODEX_HOME: codexHome,
             OPENAI_API_KEY: "test-key",
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
