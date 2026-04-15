@@ -421,16 +421,7 @@ export async function onboard(opts: OnboardOptions): Promise<void> {
             s.stop(pc.yellow("Could not validate API key — continuing anyway"));
           }
         } else {
-          const res = await fetch("https://api.openai.com/v1/models", {
-            headers: { Authorization: `Bearer ${llm.apiKey}` },
-          });
-          if (res.ok) {
-            s.stop("API key is valid");
-          } else if (res.status === 401) {
-            s.stop(pc.yellow("API key appears invalid — you can update it later"));
-          } else {
-            s.stop(pc.yellow("Could not validate API key — continuing anyway"));
-          }
+          s.stop(pc.yellow("API key validation is skipped for OpenAI-compatible providers in subscription-first mode"));
         }
       } catch {
         s.stop(pc.yellow("Could not reach API — continuing anyway"));

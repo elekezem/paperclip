@@ -41,7 +41,7 @@ const CURSOR_FALLBACK_MODEL_IDS = [
   "gemini-3-pro",
   "gemini-3-flash",
   "grok",
-  "kimi-k2.5",
+  "kimi-for-coding",
 ];
 
 export const models = CURSOR_FALLBACK_MODEL_IDS.map((id) => ({ id, label: id }));

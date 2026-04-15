@@ -51,25 +51,10 @@ export async function llmCheck(config: PaperclipConfig): Promise<CheckResult> {
         message: `Claude API returned status ${res.status}`,
       };
     } else {
-      const res = await fetch("https://api.openai.com/v1/models", {
-        headers: { Authorization: `Bearer ${config.llm.apiKey}` },
-      });
-      if (res.ok) {
-        return { name: "LLM provider", status: "pass", message: "OpenAI API key is valid" };
-      }
-      if (res.status === 401) {
-        return {
-          name: "LLM provider",
-          status: "fail",
-          message: "OpenAI API key is invalid (401)",
-          canRepair: false,
-          repairHint: "Run `paperclipai configure --section llm`",
-        };
-      }
       return {
         name: "LLM provider",
-        status: "warn",
-        message: `OpenAI API returned status ${res.status}`,
+        status: "pass",
+        message: "OpenAI-compatible API key detected; network validation is disabled in subscription-first mode",
       };
     }
   } catch {
