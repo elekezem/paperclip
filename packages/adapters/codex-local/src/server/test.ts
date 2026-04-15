@@ -27,11 +27,11 @@ function isNonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function stripOpenAiApiKey(env: Record<string, string>): Record<string, string> {
+function stripOpenAiApiKey<T extends Record<string, string | undefined>>(env: T): T {
   if (!isNonEmpty(env.OPENAI_API_KEY)) return env;
   const sanitized = { ...env };
   delete sanitized.OPENAI_API_KEY;
-  return sanitized;
+  return sanitized as T;
 }
 
 function firstNonEmptyLine(text: string): string {
