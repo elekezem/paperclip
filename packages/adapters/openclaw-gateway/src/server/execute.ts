@@ -350,6 +350,9 @@ function buildPaperclipEnvForWake(ctx: AdapterExecutionContext, wakePayload: Wak
   if (wakePayload.issueIds.length > 0) {
     paperclipEnv.PAPERCLIP_LINKED_ISSUE_IDS = wakePayload.issueIds.join(",");
   }
+  if (nonEmpty(ctx.authToken)) {
+    paperclipEnv.PAPERCLIP_API_KEY = ctx.authToken!.trim();
+  }
 
   return paperclipEnv;
 }
@@ -360,6 +363,7 @@ function buildWakeText(
   structuredWakePrompt: string,
 ): string {
   const claimedApiKeyPath = "~/.openclaw/workspace/paperclip-claimed-api-key.json";
+  const inlineApiKey = nonEmpty(paperclipEnv.PAPERCLIP_API_KEY);
   const orderedKeys = [
     "PAPERCLIP_RUN_ID",
     "PAPERCLIP_AGENT_ID",
@@ -390,9 +394,18 @@ function buildWakeText(
     "",
     "Set these values in your run context:",
     ...envLines,
-    `PAPERCLIP_API_KEY=<token from ${claimedApiKeyPath}>`,
-    "",
-    `Load PAPERCLIP_API_KEY from ${claimedApiKeyPath} (the token you saved after claim-api-key).`,
+    ...(inlineApiKey
+      ? [
+          `PAPERCLIP_API_KEY=${inlineApiKey}`,
+          "",
+          "Use the provided PAPERCLIP_API_KEY exactly as-is for this run.",
+          "It is already scoped to the current Paperclip run. Do not replace it with a shared claimed key file.",
+        ]
+      : [
+          `PAPERCLIP_API_KEY=<token from ${claimedApiKeyPath}>`,
+          "",
+          `Load PAPERCLIP_API_KEY from ${claimedApiKeyPath} (the token you saved after claim-api-key).`,
+        ]),
     "",
     `api_base=${apiBaseHint}`,
     `task_id=${payload.taskId ?? ""}`,
@@ -1077,9 +1090,13 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const payloadTemplate = parseObject(ctx.config.payloadTemplate);
   const transportHint = nonEmpty(ctx.config.streamTransport) ?? nonEmpty(ctx.config.transport);
+  const hasStructuredWakePayload = asRecord(ctx.context.paperclipWake) !== null;
   const attachPaperclipPayload =
     parseBoolean(ctx.config.attachPaperclipPayload, false)
-    || parseBoolean(ctx.config.includePaperclipPayload, false);
+    || parseBoolean(ctx.config.includePaperclipPayload, false)
+    // Preserve structured Paperclip issue context by default when this run
+    // already carries a wake payload.
+    || hasStructuredWakePayload;
 
   const headers = toStringRecord(ctx.config.headers);
   const authToken = resolveAuthToken(parseObject(ctx.config), headers);

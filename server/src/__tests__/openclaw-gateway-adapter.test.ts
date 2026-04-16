@@ -489,7 +489,7 @@ describe("openclaw gateway adapter execute", () => {
       const payload = gateway.getAgentPayload();
       expect(payload).toBeTruthy();
       expect(payload?.idempotencyKey).toBe("run-123");
-      expect(payload?.sessionKey).toBe("paperclip:issue:issue-123");
+      expect(payload?.sessionKey).toBe("agent:agent-123:paperclip:issue:issue-123");
       expect(String(payload?.message ?? "")).toContain("wake now");
       expect(String(payload?.message ?? "")).toContain("PAPERCLIP_RUN_ID=run-123");
       expect(String(payload?.message ?? "")).toContain("PAPERCLIP_TASK_ID=task-123");
@@ -510,6 +510,35 @@ describe("openclaw gateway adapter execute", () => {
       });
 
       expect(logs.some((entry) => entry.includes("[openclaw-gateway:event] run=run-123 stream=assistant"))).toBe(true);
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("prefers the injected run-scoped Paperclip token over the shared claimed key file", async () => {
+    const gateway = await createMockGatewayServer();
+
+    try {
+      await execute(
+        buildContext(
+          {
+            url: gateway.url,
+            headers: {
+              "x-openclaw-token": "gateway-token",
+            },
+            waitTimeoutMs: 2000,
+          },
+          {
+            authToken: "pcp_run_scoped_token_123",
+          },
+        ),
+      );
+
+      const payload = gateway.getAgentPayload();
+      const message = String(payload?.message ?? "");
+      expect(message).toContain("PAPERCLIP_API_KEY=pcp_run_scoped_token_123");
+      expect(message).toContain("Use the provided PAPERCLIP_API_KEY exactly as-is for this run.");
+      expect(message).not.toContain("paperclip-claimed-api-key.json");
     } finally {
       await gateway.close();
     }
