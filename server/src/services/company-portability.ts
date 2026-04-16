@@ -693,6 +693,19 @@ function derivePortableProjectWorkspaceKey(
   return uniqueSlug(baseKey, usedKeys);
 }
 
+function collectAgentReferenceKeys(...values: Array<string | null | undefined>): string[] {
+  const keys = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length === 0) continue;
+    keys.add(trimmed);
+    const normalized = normalizeAgentUrlKey(trimmed);
+    if (normalized) keys.add(normalized);
+  }
+  return [...keys];
+}
+
 function exportPortableProjectExecutionWorkspacePolicy(
   projectSlug: string,
   policy: unknown,
@@ -3531,9 +3544,12 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
     if (input.target.mode === "existing_company") {
       const existingAgents = await agents.list(input.target.companyId);
       for (const existing of existingAgents) {
-        const slug = normalizeAgentUrlKey(existing.name) ?? existing.id;
-        if (!existingSlugToAgent.has(slug)) existingSlugToAgent.set(slug, existing);
-        existingSlugs.add(slug);
+        const referenceKeys = collectAgentReferenceKeys(existing.name, existing.urlKey);
+        if (referenceKeys.length === 0) referenceKeys.push(existing.id);
+        for (const referenceKey of referenceKeys) {
+          if (!existingSlugToAgent.has(referenceKey)) existingSlugToAgent.set(referenceKey, existing);
+          existingSlugs.add(referenceKey);
+        }
       }
       const existingProjects = await projects.list(input.target.companyId);
       for (const existing of existingProjects) {
@@ -3559,7 +3575,9 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
     }
 
     for (const manifestAgent of selectedAgents) {
-      const existing = existingSlugToAgent.get(manifestAgent.slug) ?? null;
+      const existing = collectAgentReferenceKeys(manifestAgent.slug, manifestAgent.name)
+        .map((referenceKey) => existingSlugToAgent.get(referenceKey) ?? null)
+        .find((candidate) => candidate !== null) ?? null;
       if (!existing) {
         agentPlans.push({
           slug: manifestAgent.slug,
@@ -3884,7 +3902,11 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
     const existingSlugToAgentId = new Map<string, string>();
     const existingAgents = await agents.list(targetCompany.id);
     for (const existing of existingAgents) {
-      existingSlugToAgentId.set(normalizeAgentUrlKey(existing.name) ?? existing.id, existing.id);
+      const referenceKeys = collectAgentReferenceKeys(existing.name, existing.urlKey);
+      if (referenceKeys.length === 0) referenceKeys.push(existing.id);
+      for (const referenceKey of referenceKeys) {
+        existingSlugToAgentId.set(referenceKey, existing.id);
+      }
     }
     const importedSlugToProjectId = new Map<string, string>();
     const importedProjectWorkspaceIdByProjectSlug = new Map<string, Map<string, string>>();
@@ -4007,8 +4029,10 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
           } catch (err) {
             warnings.push(`Failed to materialize instructions bundle for ${manifestAgent.slug}: ${err instanceof Error ? err.message : String(err)}`);
           }
-          importedSlugToAgentId.set(planAgent.slug, updated.id);
-          existingSlugToAgentId.set(normalizeAgentUrlKey(updated.name) ?? updated.id, updated.id);
+          for (const referenceKey of collectAgentReferenceKeys(planAgent.slug, manifestAgent.name, updated.name, updated.urlKey)) {
+            importedSlugToAgentId.set(referenceKey, updated.id);
+            existingSlugToAgentId.set(referenceKey, updated.id);
+          }
           resultAgents.push({
             slug: planAgent.slug,
             id: updated.id,
@@ -4038,8 +4062,10 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
         } catch (err) {
           warnings.push(`Failed to materialize instructions bundle for ${manifestAgent.slug}: ${err instanceof Error ? err.message : String(err)}`);
         }
-        importedSlugToAgentId.set(planAgent.slug, created.id);
-        existingSlugToAgentId.set(normalizeAgentUrlKey(created.name) ?? created.id, created.id);
+        for (const referenceKey of collectAgentReferenceKeys(planAgent.slug, manifestAgent.name, created.name, created.urlKey)) {
+          importedSlugToAgentId.set(referenceKey, created.id);
+          existingSlugToAgentId.set(referenceKey, created.id);
+        }
         resultAgents.push({
           slug: planAgent.slug,
           id: created.id,

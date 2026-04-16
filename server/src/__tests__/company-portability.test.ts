@@ -1638,6 +1638,95 @@ describe("company portability", () => {
     }));
   });
 
+  it("matches existing agents by normalized slug and urlKey during replace preview", async () => {
+    const portability = companyPortabilityService({} as any);
+
+    companySvc.getById.mockResolvedValue({
+      id: "company-1",
+      name: "AKESO KNOWBASE",
+      description: "Existing company",
+      brandColor: null,
+      requireBoardApprovalForNewAgents: true,
+    });
+    agentSvc.list.mockResolvedValue([
+      {
+        id: "agent-kb-director",
+        name: "KB Director",
+        urlKey: "kb-director",
+        status: "idle",
+        role: "general",
+        title: "Knowledge Director",
+        icon: null,
+        reportsTo: null,
+        capabilities: null,
+        adapterType: "process",
+        adapterConfig: {},
+        runtimeConfig: {},
+        budgetMonthlyCents: 0,
+        permissions: {},
+        metadata: null,
+      },
+    ]);
+    projectSvc.list.mockResolvedValue([]);
+
+    const preview = await portability.previewImport({
+      source: {
+        type: "inline",
+        rootPath: "akeso-knowbase",
+        files: {
+          "COMPANY.md": [
+            "---",
+            'schema: "agentcompanies/v1"',
+            'kind: "company"',
+            'slug: "akeso-knowbase"',
+            'name: "AKESO KNOWBASE"',
+            "---",
+            "",
+            "# AKESO KNOWBASE",
+            "",
+          ].join("\n"),
+          "agents/kb-director/AGENTS.md": [
+            "---",
+            'schema: "agentcompanies/v1"',
+            'kind: "agent"',
+            'slug: "kb_director"',
+            'name: "KB Director"',
+            'title: "Knowledge Director"',
+            "---",
+            "",
+            "# KB Director",
+            "",
+            "You own knowledge policy.",
+            "",
+          ].join("\n"),
+        },
+      },
+      include: {
+        company: true,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+      target: {
+        mode: "existing_company",
+        companyId: "company-1",
+      },
+      agents: "all",
+      collisionStrategy: "replace",
+    });
+
+    expect(preview.errors).toEqual([]);
+    expect(preview.plan.agentPlans).toEqual([
+      {
+        slug: "kb_director",
+        action: "update",
+        plannedName: "KB Director",
+        existingAgentId: "agent-kb-director",
+        reason: "Existing slug matched; replace strategy.",
+      },
+    ]);
+  });
+
   it("treats no-separator auth and api key env names as secrets during export", async () => {
     const portability = companyPortabilityService({} as any);
 
