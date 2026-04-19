@@ -30,13 +30,32 @@ async function proxyKernel(pathname: string, init?: RequestInit) {
   return response.json();
 }
 
-function readFallback(companyId: string, kind: "mission-control" | "dashboard" | "demo-status") {
+function readFallback(companyId: string, kind: "mission-control" | "dashboard" | "demo-status" | "demo-campaign") {
+  const demoCampaignFallback = {
+    enabled: false,
+    effectiveStatus: "disabled",
+    budgetUsd: 0,
+    targetUsd: 0,
+    metrics: {
+      currentEquityUsd: 0,
+      progressToTargetPct: 0,
+      reservedExposureUsd: 0,
+      grossExposureUsd: 0,
+      openOrderReserveUsd: 0,
+      dailyLossUsedUsd: 0,
+      remainingBudgetUsd: 0,
+      openPositionCount: 0,
+      openPositions: [],
+    },
+    error: "Trading Kernel not available",
+  };
   if (kind === "mission-control") {
     return {
       enabled: false,
       companyId,
       companyName: null,
       executionMode: "shadow_only",
+      campaign: demoCampaignFallback,
       connectors: [],
       stats: {
         marketPulses: 0,
@@ -72,15 +91,20 @@ function readFallback(companyId: string, kind: "mission-control" | "dashboard" |
         error: "Trading Kernel not available",
       },
       orderSummary: { shadow: 0, demo: 0, live: 0 },
+      campaign: demoCampaignFallback,
       panels: {
         marketScan: { title: "Market Scan", items: [] },
         candidatePool: { title: "Candidate Pool", items: [] },
         opportunityBoard: { title: "Opportunity Board", items: [] },
+        campaignGovernor: { title: "Campaign Governor", summary: null, openPositions: [] },
         sourceGraph: { title: "Source Graph", items: [] },
         knowledgeBase: { title: "Knowledge Base", notes: [], revisions: [], founderBriefs: [] },
       },
       connectors: [],
     };
+  }
+  if (kind === "demo-campaign") {
+    return demoCampaignFallback;
   }
   return {
     readiness: "not_configured",
@@ -142,6 +166,29 @@ export function tradingRoutes(_db: Db) {
       }
       throw error;
     }
+  });
+
+  router.get("/trading/companies/:companyId/demo/campaign", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    try {
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/campaign`));
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) {
+        res.json(readFallback(companyId, "demo-campaign"));
+        return;
+      }
+      throw error;
+    }
+  });
+
+  router.put("/trading/companies/:companyId/demo/campaign", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    res.json(await proxyKernel(`/api/companies/${companyId}/demo/campaign`, {
+      method: "PUT",
+      body: JSON.stringify(req.body ?? {}),
+    }));
   });
 
   router.post("/trading/companies/:companyId/demo/orders", async (req, res) => {
