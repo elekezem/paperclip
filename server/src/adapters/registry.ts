@@ -4,6 +4,7 @@ import {
   execute as claudeExecute,
   listClaudeSkills,
   syncClaudeSkills,
+  listClaudeModels,
   testEnvironment as claudeTestEnvironment,
   sessionCodec as claudeSessionCodec,
   getQuotaWindows as claudeGetQuotaWindows,
@@ -67,18 +68,6 @@ import {
 import {
   agentConfigurationDoc as piAgentConfigurationDoc,
 } from "@paperclipai/adapter-pi-local";
-import {
-  execute as hermesExecute,
-  testEnvironment as hermesTestEnvironment,
-  sessionCodec as hermesSessionCodec,
-  listSkills as hermesListSkills,
-  syncSkills as hermesSyncSkills,
-  detectModel as detectModelFromHermes,
-} from "hermes-paperclip-adapter/server";
-import {
-  agentConfigurationDoc as hermesAgentConfigurationDoc,
-  models as hermesModels,
-} from "hermes-paperclip-adapter";
 import { BUILTIN_ADAPTER_TYPES } from "./builtin-adapter-types.js";
 import { buildExternalAdapters } from "./plugin-loader.js";
 import { getDisabledAdapterTypes } from "../services/adapter-plugin-store.js";
@@ -94,7 +83,11 @@ const claudeLocalAdapter: ServerAdapterModule = {
   sessionCodec: claudeSessionCodec,
   sessionManagement: getAdapterSessionManagement("claude_local") ?? undefined,
   models: claudeModels,
+  listModels: listClaudeModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: claudeAgentConfigurationDoc,
   getQuotaWindows: claudeGetQuotaWindows,
 };
@@ -110,6 +103,9 @@ const codexLocalAdapter: ServerAdapterModule = {
   models: codexModels,
   listModels: listCodexModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: codexAgentConfigurationDoc,
   getQuotaWindows: codexGetQuotaWindows,
 };
@@ -125,6 +121,9 @@ const cursorLocalAdapter: ServerAdapterModule = {
   models: cursorModels,
   listModels: listCursorModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: cursorAgentConfigurationDoc,
 };
 
@@ -138,6 +137,9 @@ const geminiLocalAdapter: ServerAdapterModule = {
   sessionManagement: getAdapterSessionManagement("gemini_local") ?? undefined,
   models: geminiModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: geminiAgentConfigurationDoc,
 };
 
@@ -147,6 +149,8 @@ const openclawGatewayAdapter: ServerAdapterModule = {
   testEnvironment: openclawGatewayTestEnvironment,
   models: openclawGatewayModels,
   supportsLocalAgentJwt: false,
+  supportsInstructionsBundle: false,
+  requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: openclawGatewayAgentConfigurationDoc,
 };
 
@@ -161,6 +165,9 @@ const openCodeLocalAdapter: ServerAdapterModule = {
   sessionManagement: getAdapterSessionManagement("opencode_local") ?? undefined,
   listModels: listOpenCodeModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: openCodeAgentConfigurationDoc,
 };
 
@@ -175,20 +182,10 @@ const piLocalAdapter: ServerAdapterModule = {
   models: [],
   listModels: listPiModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: piAgentConfigurationDoc,
-};
-
-const hermesLocalAdapter: ServerAdapterModule = {
-  type: "hermes_local",
-  execute: hermesExecute,
-  testEnvironment: hermesTestEnvironment,
-  sessionCodec: hermesSessionCodec,
-  listSkills: hermesListSkills,
-  syncSkills: hermesSyncSkills,
-  models: hermesModels,
-  supportsLocalAgentJwt: true,
-  agentConfigurationDoc: hermesAgentConfigurationDoc,
-  detectModel: () => detectModelFromHermes(),
 };
 
 const adaptersByType = new Map<string, ServerAdapterModule>();
@@ -211,7 +208,6 @@ function registerBuiltInAdapters() {
     cursorLocalAdapter,
     geminiLocalAdapter,
     openclawGatewayAdapter,
-    hermesLocalAdapter,
     processAdapter,
     httpAdapter,
   ]) {

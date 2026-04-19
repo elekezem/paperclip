@@ -47,7 +47,7 @@ vi.mock("../context/LocaleContext", () => ({
 }));
 
 vi.mock("../context/ToastContext", () => ({
-  useToast: () => ({ pushToast: vi.fn() }),
+  useToastActions: () => ({ pushToast: vi.fn() }),
 }));
 
 vi.mock("../api/routines", () => ({
@@ -226,6 +226,25 @@ vi.mock("../components/AgentIconPicker", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+const localStorageState = new Map<string, string>();
+const localStorageMock = {
+  getItem: (key: string) => localStorageState.get(key) ?? null,
+  setItem: (key: string, value: string) => {
+    localStorageState.set(key, value);
+  },
+  removeItem: (key: string) => {
+    localStorageState.delete(key);
+  },
+  clear: () => {
+    localStorageState.clear();
+  },
+};
+
+Object.defineProperty(globalThis, "localStorage", {
+  value: localStorageMock,
+  configurable: true,
+});
+
 function createRoutine(overrides: Partial<RoutineListItem>): RoutineListItem {
   return {
     id: "routine-1",
@@ -343,12 +362,6 @@ describe("Routines page", () => {
         ["agent-1", { name: "Agent One" }],
         ["agent-2", { name: "Agent Two" }],
       ]),
-      {
-        noProject: "No project",
-        unknownProject: "Unknown project",
-        unassigned: "Unassigned",
-        unknownAgent: "Unknown agent",
-      },
     );
 
     expect(groups.map((group) => group.label)).toEqual(["Project Alpha", "Project Beta"]);

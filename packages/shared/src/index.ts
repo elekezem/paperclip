@@ -3,6 +3,7 @@ export {
   COMPANY_STATUSES,
   DEPLOYMENT_MODES,
   DEPLOYMENT_EXPOSURES,
+  BIND_MODES,
   AUTH_BASE_URL_MODES,
   AGENT_STATUSES,
   AGENT_ADAPTER_TYPES,
@@ -14,6 +15,11 @@ export {
   INBOX_MINE_ISSUE_STATUS_FILTER,
   ISSUE_PRIORITIES,
   ISSUE_ORIGIN_KINDS,
+  ISSUE_RELATION_TYPES,
+  ISSUE_EXECUTION_POLICY_MODES,
+  ISSUE_EXECUTION_STAGE_TYPES,
+  ISSUE_EXECUTION_STATE_STATUSES,
+  ISSUE_EXECUTION_DECISION_OUTCOMES,
   GOAL_LEVELS,
   GOAL_STATUSES,
   PROJECT_STATUSES,
@@ -75,6 +81,7 @@ export {
   type CompanyStatus,
   type DeploymentMode,
   type DeploymentExposure,
+  type BindMode,
   type AuthBaseUrlMode,
   type AgentStatus,
   type AgentAdapterType,
@@ -83,6 +90,11 @@ export {
   type IssueStatus,
   type IssuePriority,
   type IssueOriginKind,
+  type IssueRelationType,
+  type IssueExecutionPolicyMode,
+  type IssueExecutionStageType,
+  type IssueExecutionStateStatus,
+  type IssueExecutionDecisionOutcome,
   type GoalLevel,
   type GoalStatus,
   type ProjectStatus,
@@ -141,6 +153,16 @@ export {
   type PluginBridgeErrorCode,
 } from "./constants.js";
 
+export {
+  ALL_INTERFACES_BIND_HOST,
+  LOOPBACK_BIND_HOST,
+  inferBindModeFromHost,
+  isAllInterfacesHost,
+  isLoopbackHost,
+  resolveRuntimeBind,
+  validateConfiguredBindMode,
+} from "./network-bind.js";
+
 export type {
   Company,
   FeedbackVote,
@@ -181,6 +203,7 @@ export type {
   InstanceExperimentalSettings,
   InstanceGeneralSettings,
   InstanceSettings,
+  BackupRetentionPolicy,
   Agent,
   AgentAccessState,
   AgentChainOfCommandEntry,
@@ -203,6 +226,7 @@ export type {
   ProjectGoalRef,
   ProjectWorkspace,
   ExecutionWorkspace,
+  ExecutionWorkspaceSummary,
   ExecutionWorkspaceConfig,
   ExecutionWorkspaceCloseAction,
   ExecutionWorkspaceCloseActionKind,
@@ -211,7 +235,11 @@ export type {
   ExecutionWorkspaceCloseReadiness,
   ExecutionWorkspaceCloseReadinessState,
   ProjectWorkspaceRuntimeConfig,
+  WorkspaceCommandDefinition,
+  WorkspaceCommandKind,
+  WorkspaceRuntimeControlTarget,
   WorkspaceRuntimeService,
+  WorkspaceRuntimeServiceStateMap,
   WorkspaceOperation,
   WorkspaceOperationPhase,
   WorkspaceOperationStatus,
@@ -231,6 +259,14 @@ export type {
   IssueWorkProductReviewState,
   Issue,
   IssueAssigneeAdapterOverrides,
+  IssueRelation,
+  IssueRelationIssueSummary,
+  IssueExecutionPolicy,
+  IssueExecutionState,
+  IssueExecutionStage,
+  IssueExecutionStageParticipant,
+  IssueExecutionStagePrincipal,
+  IssueExecutionDecision,
   IssueComment,
   IssueDocument,
   IssueDocumentSummary,
@@ -272,6 +308,8 @@ export type {
   DashboardSummary,
   ActivityEvent,
   SidebarBadges,
+  SidebarOrderPreference,
+  InboxDismissal,
   CompanyMembership,
   PrincipalPermissionGrant,
   Invite,
@@ -374,6 +412,21 @@ export type {
 } from "./types/index.js";
 
 export {
+  sidebarOrderPreferenceSchema,
+  upsertSidebarOrderPreferenceSchema,
+  type UpsertSidebarOrderPreference,
+} from "./validators/sidebar-preferences.js";
+
+export { workspaceRuntimeControlTargetSchema } from "./validators/execution-workspace.js";
+export {
+  findWorkspaceCommandDefinition,
+  listWorkspaceCommandDefinitions,
+  listWorkspaceServiceCommandDefinitions,
+  matchWorkspaceRuntimeServiceToCommand,
+  scoreWorkspaceRuntimeServiceMatch,
+} from "./workspace-commands.js";
+
+export {
   DEFAULT_FEEDBACK_DATA_SHARING_PREFERENCE,
   FEEDBACK_TARGET_TYPES,
   FEEDBACK_DATA_SHARING_PREFERENCES,
@@ -381,6 +434,13 @@ export {
   FEEDBACK_VOTE_VALUES,
   DEFAULT_FEEDBACK_DATA_SHARING_TERMS_VERSION,
 } from "./types/feedback.js";
+
+export {
+  DAILY_RETENTION_PRESETS,
+  WEEKLY_RETENTION_PRESETS,
+  MONTHLY_RETENTION_PRESETS,
+  DEFAULT_BACKUP_RETENTION,
+} from "./types/instance.js";
 
 export {
   getClosedIsolatedExecutionWorkspaceMessage,
@@ -452,6 +512,8 @@ export {
   createIssueSchema,
   createIssueLabelSchema,
   updateIssueSchema,
+  issueExecutionPolicySchema,
+  issueExecutionStateSchema,
   issueExecutionWorkspaceSettingsSchema,
   checkoutIssueSchema,
   addIssueCommentSchema,
@@ -647,8 +709,11 @@ export {
 } from "./project-mentions.js";
 
 export {
+  BUILTIN_ROUTINE_VARIABLE_NAMES,
   extractRoutineVariableNames,
+  getBuiltinRoutineVariableValues,
   interpolateRoutineTemplate,
+  isBuiltinRoutineVariable,
   isValidRoutineVariableName,
   stringifyRoutineVariableValue,
   syncRoutineVariablesWithTemplate,
