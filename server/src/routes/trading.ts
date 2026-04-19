@@ -49,6 +49,22 @@ function readFallback(companyId: string, kind: "mission-control" | "dashboard" |
     },
     error: "Trading Kernel not available",
   };
+  const autoTradingFallback = {
+    entryMode: "auto",
+    exitMode: "auto",
+    status: "inactive",
+    lastCycleAt: null,
+    lastDecisionAt: null,
+    lastError: "Trading Kernel not available",
+    lastAction: null,
+  };
+  const startupFlattenFallback = {
+    pending: false,
+    requestedAt: null,
+    completedAt: null,
+    orderIds: [],
+    lastOutcome: null,
+  };
   if (kind === "mission-control") {
     return {
       enabled: false,
@@ -56,6 +72,8 @@ function readFallback(companyId: string, kind: "mission-control" | "dashboard" |
       companyName: null,
       executionMode: "shadow_only",
       campaign: demoCampaignFallback,
+      autoTrading: autoTradingFallback,
+      startupFlatten: startupFlattenFallback,
       connectors: [],
       stats: {
         marketPulses: 0,
@@ -90,6 +108,8 @@ function readFallback(companyId: string, kind: "mission-control" | "dashboard" |
         account: null,
         error: "Trading Kernel not available",
       },
+      autoTrading: autoTradingFallback,
+      startupFlatten: startupFlattenFallback,
       orderSummary: { shadow: 0, demo: 0, live: 0 },
       campaign: demoCampaignFallback,
       panels: {
@@ -190,6 +210,23 @@ export function tradingRoutes(_db: Db) {
       body: JSON.stringify(req.body ?? {}),
     }));
   });
+
+  router.get("/trading/companies/:companyId/demo/auto-trading/status", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    res.json(await proxyKernel(`/api/companies/${companyId}/demo/auto-trading/status`));
+  });
+
+  for (const action of ["start", "stop", "cycle"] as const) {
+    router.post(`/trading/companies/:companyId/demo/auto-trading/${action}`, async (req, res) => {
+      const companyId = req.params.companyId as string;
+      assertCompanyAccess(req, companyId);
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/auto-trading/${action}`, {
+        method: "POST",
+        body: JSON.stringify(req.body ?? {}),
+      }));
+    });
+  }
 
   router.post("/trading/companies/:companyId/demo/orders", async (req, res) => {
     const companyId = req.params.companyId as string;
