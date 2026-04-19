@@ -23,8 +23,8 @@ import { CompanyLaneChips } from "./CompanyLaneChips";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
 import { useI18n } from "../context/LocaleContext";
-import { heartbeatsApi } from "../api/heartbeats";
 import { dashboardApi } from "../api/dashboard";
+import { heartbeatsApi } from "../api/heartbeats";
 import { issuesApi } from "../api/issues";
 import { queryKeys } from "../lib/queryKeys";
 import { useInboxBadge } from "../hooks/useInboxBadge";
@@ -65,7 +65,7 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="w-64 h-full min-h-0 border-r border-border bg-background flex flex-col">
+    <aside className="w-60 h-full min-h-0 border-r border-border bg-background flex flex-col">
       <div className="flex items-center gap-1 px-3 h-12 shrink-0">
         {selectedCompany?.brandColor && (
           <div
@@ -155,9 +155,6 @@ export function Sidebar() {
             <SquarePen className="h-4 w-4 shrink-0" />
             <span className="truncate">{t("sidebar.newIssue")}</span>
           </button>
-        </div>
-
-        <SidebarSection label={t("sidebar.section.missionControl")}>
           <SidebarNavItem to="/dashboard" label={t("common.missionControl")} icon={LayoutDashboard} liveCount={liveRunCount} />
           <SidebarNavItem
             to="/inbox"
@@ -167,6 +164,16 @@ export function Sidebar() {
             badgeTone={inboxBadge.failedRuns > 0 ? "danger" : "default"}
             alert={inboxBadge.failedRuns > 0}
           />
+          <PluginSlotOutlet
+            slotTypes={["sidebar"]}
+            context={pluginContext}
+            className="flex flex-col gap-0.5"
+            itemClassName="text-[13px] font-medium"
+            missingBehavior="placeholder"
+          />
+        </div>
+
+        <SidebarSection label={t("sidebar.section.missionControl")}>
           <SidebarNavItem to="/issues" label={t("sidebar.nav.issues")} icon={CircleDot} />
           <SidebarNavItem to="/activity" label={t("sidebar.nav.activity")} icon={History} />
         </SidebarSection>
@@ -176,22 +183,14 @@ export function Sidebar() {
           <SidebarNavItem to="/goals" label={t("sidebar.nav.goals")} icon={Target} />
         </SidebarSection>
 
-        <PluginSlotOutlet
-          slotTypes={["sidebar"]}
-          context={pluginContext}
-          className="flex flex-col gap-0.5"
-          itemClassName="text-[13px] font-medium"
-          missingBehavior="placeholder"
-        />
-
         <SidebarProjects />
 
         <SidebarAgents />
 
         <SidebarSection label={t("sidebar.section.company")}>
           <SidebarNavItem to="/org" label={t("sidebar.company.org")} icon={Network} />
-          <SidebarNavItem to="/costs" label={t("sidebar.company.costs")} icon={DollarSign} />
           <SidebarNavItem to="/skills" label={t("sidebar.company.skills")} icon={Boxes} />
+          <SidebarNavItem to="/costs" label={t("sidebar.company.costs")} icon={DollarSign} />
           <SidebarNavItem to="/company/settings" label={t("sidebar.nav.settings")} icon={Settings} />
         </SidebarSection>
 
