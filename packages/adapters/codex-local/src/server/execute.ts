@@ -25,6 +25,10 @@ import { parseCodexJsonl, isCodexUnknownSessionError } from "./parse.js";
 import { pathExists, prepareManagedCodexHome, resolveManagedCodexHomeDir, resolveSharedCodexHomeDir } from "./codex-home.js";
 import { resolveCodexDesiredSkillNames } from "./skills.js";
 import { buildCodexExecArgs } from "./codex-args.js";
+import {
+  DARWIN_BUNDLED_CODEX_COMMAND,
+  resolveCodexCommand,
+} from "./command.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const CODEX_ROLLOUT_NOISE_RE =
@@ -62,7 +66,7 @@ function hasNonEmptyEnvValue(env: Record<string, string>, key: string): boolean 
 function stripOpenAiApiKey(env: Record<string, string>): Record<string, string> {
   if (!hasNonEmptyEnvValue(env, "OPENAI_API_KEY")) return env;
   const sanitized = { ...env };
-  delete sanitized.OPENAI_API_KEY;
+  sanitized.OPENAI_API_KEY = "";
   return sanitized;
 }
 
@@ -224,7 +228,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     config.promptTemplate,
     "You are agent {{agent.id}} ({{agent.name}}). Continue your Paperclip work.",
   );
-  const command = asString(config.command, "codex");
+  const command = resolveCodexCommand(config.command, {
+    bundledCodexExists:
+      process.platform === "darwin" && (await pathExists(DARWIN_BUNDLED_CODEX_COMMAND)),
+  });
   const model = asString(config.model, "");
 
   const workspaceContext = parseObject(context.paperclipWorkspace);

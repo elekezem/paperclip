@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -15,6 +16,7 @@ import path from "node:path";
 import { parseCodexJsonl } from "./parse.js";
 import { codexHomeDir, readCodexAuthInfo } from "./quota.js";
 import { buildCodexExecArgs } from "./codex-args.js";
+import { resolveCodexCommand } from "./command.js";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {
   if (checks.some((check) => check.level === "error")) return "fail";
@@ -26,10 +28,10 @@ function isNonEmpty(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function stripOpenAiApiKey<T extends Record<string, string | undefined>>(env: T): T {
+function stripOpenAiApiKey<T extends Record<string, string | undefined> & { OPENAI_API_KEY?: string }>(env: T): T {
   if (!isNonEmpty(env.OPENAI_API_KEY)) return env;
   const sanitized = { ...env };
-  delete sanitized.OPENAI_API_KEY;
+  sanitized.OPENAI_API_KEY = "" as T["OPENAI_API_KEY"];
   return sanitized as T;
 }
 
@@ -63,7 +65,10 @@ export async function testEnvironment(
 ): Promise<AdapterEnvironmentTestResult> {
   const checks: AdapterEnvironmentCheck[] = [];
   const config = parseObject(ctx.config);
-  const command = asString(config.command, "codex");
+  const command = resolveCodexCommand(config.command, {
+    bundledCodexExists:
+      process.platform === "darwin" && existsSync("/Applications/Codex.app/Contents/Resources/codex"),
+  });
   const cwd = asString(config.cwd, process.cwd());
 
   try {
