@@ -6,6 +6,7 @@ import {
   activityLog,
   agents,
   agentRuntimeState,
+  agentTaskSessions,
   agentWakeupRequests,
   companySkills,
   companies,
@@ -22,6 +23,7 @@ import {
 import { runningProcesses } from "../adapters/index.ts";
 const mockTelemetryClient = vi.hoisted(() => ({ track: vi.fn() }));
 const mockTrackAgentFirstHeartbeat = vi.hoisted(() => vi.fn());
+const mockGetServerAdapter = vi.hoisted(() => vi.fn());
 
 vi.mock("../telemetry.ts", () => ({
   getTelemetryClient: () => mockTelemetryClient,
@@ -41,17 +43,7 @@ vi.mock("../adapters/index.ts", async () => {
   const actual = await vi.importActual<typeof import("../adapters/index.ts")>("../adapters/index.ts");
   return {
     ...actual,
-    getServerAdapter: vi.fn(() => ({
-      supportsLocalAgentJwt: false,
-      execute: vi.fn(async () => ({
-        exitCode: 0,
-        signal: null,
-        timedOut: false,
-        errorMessage: null,
-        provider: "test",
-        model: "test-model",
-      })),
-    })),
+    getServerAdapter: mockGetServerAdapter,
   };
 });
 
@@ -64,6 +56,22 @@ if (!embeddedPostgresSupport.supported) {
     `Skipping embedded Postgres heartbeat recovery tests on this host: ${embeddedPostgresSupport.reason ?? "unsupported environment"}`,
   );
 }
+
+function installDefaultServerAdapterMock() {
+  mockGetServerAdapter.mockImplementation(() => ({
+    supportsLocalAgentJwt: false,
+    execute: vi.fn(async () => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      errorMessage: null,
+      provider: "test",
+      model: "test-model",
+    })),
+  }));
+}
+
+installDefaultServerAdapterMock();
 
 function spawnAliveProcess() {
   return spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
@@ -157,6 +165,8 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
 
   afterEach(async () => {
     vi.clearAllMocks();
+    mockGetServerAdapter.mockReset();
+    installDefaultServerAdapterMock();
     runningProcesses.clear();
     for (const child of childProcesses) {
       child.kill("SIGKILL");
@@ -180,6 +190,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     await db.delete(activityLog);
     await db.delete(agentRuntimeState);
+    await db.delete(agentTaskSessions);
     await db.delete(companySkills);
     await db.delete(issueComments);
     await db.delete(issues);
@@ -218,6 +229,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
 
   async function seedRunFixture(input?: {
     adapterType?: string;
+    adapterConfig?: Record<string, unknown>;
     agentStatus?: "paused" | "idle" | "running";
     runStatus?: "running" | "queued" | "failed";
     processPid?: number | null;
@@ -249,7 +261,7 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       role: "engineer",
       status: input?.agentStatus ?? "paused",
       adapterType: input?.adapterType ?? "codex_local",
-      adapterConfig: {},
+      adapterConfig: input?.adapterConfig ?? {},
       runtimeConfig: {},
       permissions: {},
     });
@@ -549,6 +561,87 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       expect.objectContaining({
         agentRole: "engineer",
       }),
+    );
+  });
+
+  it("falls back to codex when Gemini quota is exhausted", async () => {
+    mockGetServerAdapter.mockImplementation((adapterType: string) => {
+      if (adapterType === "gemini_local") {
+        return {
+          supportsLocalAgentJwt: false,
+          execute: vi.fn(async () => ({
+            exitCode: 1,
+            signal: null,
+            timedOut: false,
+            errorMessage: "TerminalQuotaError: status=error code=429 reason=QUOTA_EXHAUSTED",
+            errorCode: "gemini_quota_exhausted",
+            provider: "google",
+            model: "gemini-3.1-pro-preview",
+          })),
+        };
+      }
+      if (adapterType === "codex_local") {
+        return {
+          supportsLocalAgentJwt: false,
+          execute: vi.fn(async () => ({
+            exitCode: 0,
+            signal: null,
+            timedOut: false,
+            errorMessage: null,
+            provider: "openai",
+            biller: "chatgpt",
+            model: "gpt-5.3-codex",
+            sessionId: "codex-session-1",
+            sessionParams: { sessionId: "codex-session-1" },
+            sessionDisplayId: "codex-session-1",
+            summary: "fallback ok",
+            resultJson: { result: "fallback ok" },
+          })),
+        };
+      }
+      throw new Error(`Unexpected adapter type: ${adapterType}`);
+    });
+
+    const { agentId, runId } = await seedRunFixture({
+      adapterType: "gemini_local",
+      adapterConfig: {
+        fallbackAdapter: {
+          adapterType: "codex_local",
+          onErrorCodes: ["gemini_quota_exhausted"],
+          adapterConfig: {
+            model: "gpt-5.3-codex",
+          },
+        },
+      },
+      agentStatus: "idle",
+      runStatus: "queued",
+    });
+    const heartbeat = heartbeatService(db);
+
+    await heartbeat.resumeQueuedRuns();
+    const run = await waitForRunToSettle(heartbeat, runId);
+
+    expect(run?.status).toBe("succeeded");
+    expect(run?.errorCode).toBeNull();
+    const resultJson = (run?.resultJson ?? null) as Record<string, unknown> | null;
+    const route = (resultJson?.paperclipAdapterRoute ?? null) as Record<string, unknown> | null;
+    expect(route?.primaryAdapterType).toBe("gemini_local");
+    expect(route?.effectiveAdapterType).toBe("codex_local");
+    expect(route?.fallbackTriggered).toBe(true);
+    expect(route?.fallbackErrorCode).toBe("gemini_quota_exhausted");
+
+    const runtimeState = await heartbeat.getRuntimeState(agentId);
+    expect(runtimeState?.adapterType).toBe("codex_local");
+    expect(runtimeState?.sessionId).toBe("codex-session-1");
+
+    const taskSessions = await heartbeat.listTaskSessions(agentId);
+    expect(taskSessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          adapterType: "codex_local",
+          sessionDisplayId: "codex-session-1",
+        }),
+      ]),
     );
   });
 

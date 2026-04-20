@@ -84,7 +84,7 @@ describe("gemini_local environment diagnostics", () => {
       config: {
         command: "gemini",
         cwd,
-        model: "gemini-2.5-pro",
+        model: "gemini-3.1-pro-preview",
         yolo: true,
         env: {
           GEMINI_API_KEY: "test-key",
@@ -97,7 +97,7 @@ describe("gemini_local environment diagnostics", () => {
     expect(result.status).not.toBe("fail");
     const args = JSON.parse(await fs.readFile(argsCapturePath, "utf8")) as string[];
     expect(args).toContain("--model");
-    expect(args).toContain("gemini-2.5-pro");
+    expect(args).toContain("gemini-3.1-pro-preview");
     expect(args).toContain("--approval-mode");
     expect(args).toContain("yolo");
     expect(args).toContain("--prompt");

@@ -565,6 +565,12 @@ interface ParsedIssueAssigneeAdapterOverrides {
   useProjectWorkspace: boolean | null;
 }
 
+type ParsedFallbackAdapterConfig = {
+  adapterType: string;
+  onErrorCodes: string[];
+  adapterConfig: Record<string, unknown>;
+};
+
 export type ResolvedWorkspaceForRun = {
   cwd: string;
   source: "project_primary" | "task_session" | "agent_home";
@@ -597,6 +603,80 @@ export function prioritizeProjectWorkspaceCandidatesForRun<T extends ProjectWork
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function parseFallbackAdapterConfig(raw: unknown): ParsedFallbackAdapterConfig | null {
+  const parsed = parseObject(raw);
+  const adapterType = readNonEmptyString(parsed.adapterType);
+  const onErrorCodes = Array.isArray(parsed.onErrorCodes)
+    ? parsed.onErrorCodes
+        .map((value) => readNonEmptyString(value))
+        .filter((value): value is string => Boolean(value))
+    : [];
+  if (!adapterType || onErrorCodes.length === 0) return null;
+  return {
+    adapterType,
+    onErrorCodes: Array.from(new Set(onErrorCodes)),
+    adapterConfig: parseObject(parsed.adapterConfig),
+  };
+}
+
+function shouldTriggerFallbackAdapter(
+  result: AdapterExecutionResult,
+  fallback: ParsedFallbackAdapterConfig | null,
+): fallback is ParsedFallbackAdapterConfig {
+  if (!fallback) return false;
+  const errorCode = readNonEmptyString(result.errorCode);
+  if (!errorCode) return false;
+  return fallback.onErrorCodes.includes(errorCode);
+}
+
+function buildFallbackAdapterExecutionConfig(
+  baseConfig: Record<string, unknown>,
+  fallback: ParsedFallbackAdapterConfig,
+): Record<string, unknown> {
+  const shared: Record<string, unknown> = {};
+  for (const key of ["cwd", "env", "promptTemplate", "bootstrapPromptTemplate", "instructionsFilePath"]) {
+    if (Object.prototype.hasOwnProperty.call(baseConfig, key)) {
+      shared[key] = baseConfig[key];
+    }
+  }
+  for (const [key, value] of Object.entries(baseConfig)) {
+    const lowered = key.toLowerCase();
+    if (key.startsWith("paperclip") || lowered.includes("skill")) {
+      shared[key] = value;
+    }
+  }
+  const merged = {
+    ...shared,
+    ...fallback.adapterConfig,
+  };
+  delete merged.fallbackAdapter;
+  return merged;
+}
+
+function attachAdapterRouteMetadata(
+  resultJson: Record<string, unknown> | null | undefined,
+  input: {
+    primaryAdapterType: string;
+    effectiveAdapterType: string;
+    fallbackTriggered: boolean;
+    fallbackErrorCode?: string | null;
+    fallbackErrorMessage?: string | null;
+  },
+): Record<string, unknown> {
+  const base = parseObject(resultJson);
+  const route = {
+    primaryAdapterType: input.primaryAdapterType,
+    effectiveAdapterType: input.effectiveAdapterType,
+    fallbackTriggered: input.fallbackTriggered,
+    fallbackErrorCode: readNonEmptyString(input.fallbackErrorCode) ?? null,
+    fallbackErrorMessage: readNonEmptyString(input.fallbackErrorMessage) ?? null,
+  };
+  return {
+    ...base,
+    paperclipAdapterRoute: route,
+  };
 }
 
 export function summarizeHeartbeatRunContextSnapshot(
@@ -1781,6 +1861,7 @@ export function heartbeatService(db: Db) {
     }
 
     const runtimeForRun = await getRuntimeState(agent.id);
+    if (runtimeForRun?.adapterType !== agent.adapterType) return null;
     return runtimeForRun?.sessionId ?? null;
   }
 
@@ -3639,7 +3720,10 @@ export function heartbeatService(db: Db) {
     if (executionWorkspace.projectId && !readNonEmptyString(context.projectId)) {
       context.projectId = executionWorkspace.projectId;
     }
-    const runtimeSessionFallback = taskKey || resetTaskSession ? null : runtime.sessionId;
+    const runtimeSessionFallback =
+      taskKey || resetTaskSession || runtime.adapterType !== agent.adapterType
+        ? null
+        : runtime.sessionId;
     let previousSessionDisplayId = truncateDisplayId(
       explicitResumeSessionDisplayId ??
         taskSessionForRun?.sessionDisplayId ??
@@ -3851,45 +3935,107 @@ export function heartbeatService(db: Db) {
         });
       };
 
-      const adapter = getServerAdapter(agent.adapterType);
-      const authToken = adapter.supportsLocalAgentJwt
-        ? createLocalAgentJwt(agent.id, agent.companyId, agent.adapterType, run.id)
-        : null;
-      if (adapter.supportsLocalAgentJwt && !authToken) {
-        logger.warn(
-          {
-            companyId: agent.companyId,
-            agentId: agent.id,
-            runId: run.id,
-            adapterType: agent.adapterType,
+      const primaryAdapterType = agent.adapterType;
+      let effectiveAdapterType = primaryAdapterType;
+      let effectiveAgent = agent;
+      let effectiveRuntimeForAdapter = runtimeForAdapter;
+      let resultSessionCodec = sessionCodec;
+      let resultPreviousSessionParams = previousSessionParams;
+      let resultPreviousDisplayId = runtimeForAdapter.sessionDisplayId;
+      let resultPreviousLegacySessionId = runtimeForAdapter.sessionId;
+      let fallbackErrorCode: string | null = null;
+      let fallbackErrorMessage: string | null = null;
+      const fallbackAdapter = parseFallbackAdapterConfig(parseObject(runtimeConfig).fallbackAdapter);
+
+      const executeWithAdapter = async (
+        adapterType: string,
+        configForExecution: Record<string, unknown>,
+        runtimeForExecution: typeof runtimeForAdapter,
+      ) => {
+        const agentForExecution =
+          adapterType === agent.adapterType ? agent : { ...agent, adapterType };
+        const adapter = getServerAdapter(adapterType);
+        const authToken = adapter.supportsLocalAgentJwt
+          ? createLocalAgentJwt(agent.id, agent.companyId, adapterType, run.id)
+          : null;
+        if (adapter.supportsLocalAgentJwt && !authToken) {
+          logger.warn(
+            {
+              companyId: agent.companyId,
+              agentId: agent.id,
+              runId: run.id,
+              adapterType,
+            },
+            "local agent jwt secret missing or invalid; running without injected PAPERCLIP_API_KEY",
+          );
+        }
+        const result = await adapter.execute({
+          runId: run.id,
+          agent: agentForExecution,
+          runtime: runtimeForExecution,
+          config: configForExecution,
+          context,
+          onLog,
+          onMeta: onAdapterMeta,
+          onSpawn: async (meta) => {
+            await persistRunProcessMetadata(run.id, {
+              pid: meta.pid,
+              processGroupId:
+                "processGroupId" in meta && typeof meta.processGroupId === "number"
+                  ? meta.processGroupId
+                  : null,
+              startedAt: meta.startedAt,
+            });
           },
-          "local agent jwt secret missing or invalid; running without injected PAPERCLIP_API_KEY",
+          authToken: authToken ?? undefined,
+        });
+        return {
+          agentForExecution,
+          result,
+        };
+      };
+
+      const primaryExecution = await executeWithAdapter(primaryAdapterType, runtimeConfig, runtimeForAdapter);
+      let adapterResult = primaryExecution.result;
+
+      if (
+        shouldTriggerFallbackAdapter(adapterResult, fallbackAdapter) &&
+        fallbackAdapter.adapterType !== primaryAdapterType
+      ) {
+        fallbackErrorCode = readNonEmptyString(adapterResult.errorCode);
+        fallbackErrorMessage = readNonEmptyString(adapterResult.errorMessage);
+        effectiveAdapterType = fallbackAdapter.adapterType;
+        effectiveAgent = { ...agent, adapterType: effectiveAdapterType };
+        effectiveRuntimeForAdapter = {
+          sessionId: null,
+          sessionParams: null,
+          sessionDisplayId: null,
+          taskKey,
+        };
+        resultSessionCodec = getAdapterSessionCodec(effectiveAdapterType);
+        resultPreviousSessionParams = null;
+        resultPreviousDisplayId = null;
+        resultPreviousLegacySessionId = null;
+
+        await onLog(
+          "stdout",
+          `[paperclip] Primary adapter "${primaryAdapterType}" failed with ` +
+            `"${fallbackErrorCode ?? "adapter_failed"}"; retrying with fallback adapter "${effectiveAdapterType}".\n`,
         );
+
+        const fallbackExecution = await executeWithAdapter(
+          effectiveAdapterType,
+          buildFallbackAdapterExecutionConfig(runtimeConfig, fallbackAdapter),
+          effectiveRuntimeForAdapter,
+        );
+        effectiveAgent = fallbackExecution.agentForExecution;
+        adapterResult = fallbackExecution.result;
       }
-      const adapterResult = await adapter.execute({
-        runId: run.id,
-        agent,
-        runtime: runtimeForAdapter,
-        config: runtimeConfig,
-        context,
-        onLog,
-        onMeta: onAdapterMeta,
-        onSpawn: async (meta) => {
-          await persistRunProcessMetadata(run.id, {
-            pid: meta.pid,
-            processGroupId:
-              "processGroupId" in meta && typeof meta.processGroupId === "number"
-                ? meta.processGroupId
-                : null,
-            startedAt: meta.startedAt,
-          });
-        },
-        authToken: authToken ?? undefined,
-      });
+
       const adapterManagedRuntimeServices = adapterResult.runtimeServices
         ? await persistAdapterManagedRuntimeServices({
             db,
-            adapterType: agent.adapterType,
+            adapterType: effectiveAdapterType,
             runId: run.id,
             agent: {
               id: agent.id,
@@ -3935,11 +4081,11 @@ export function heartbeatService(db: Db) {
         }
       }
       const nextSessionState = resolveNextSessionState({
-        codec: sessionCodec,
+        codec: resultSessionCodec,
         adapterResult,
-        previousParams: previousSessionParams,
-        previousDisplayId: runtimeForAdapter.sessionDisplayId,
-        previousLegacySessionId: runtimeForAdapter.sessionId,
+        previousParams: resultPreviousSessionParams,
+        previousDisplayId: resultPreviousDisplayId,
+        previousLegacySessionId: resultPreviousLegacySessionId,
       });
       const rawUsage = normalizeUsageTotals(adapterResult.usage);
       const sessionUsageResolution = await resolveNormalizedUsageForSession({
@@ -3976,6 +4122,10 @@ export function heartbeatService(db: Db) {
               ? "timed_out"
               : "failed";
 
+      const fallbackTriggered = effectiveAdapterType !== primaryAdapterType;
+      const taskSessionReused = fallbackTriggered ? false : taskSessionForRun != null;
+      const sessionRotated = fallbackTriggered ? false : sessionCompaction.rotate;
+      const sessionRotationReason = fallbackTriggered ? null : sessionCompaction.reason;
       const usageJson =
         normalizedUsage || adapterResult.costUsd != null
           ? ({
@@ -3989,11 +4139,13 @@ export function heartbeatService(db: Db) {
               ...((nextSessionState.displayId ?? nextSessionState.legacySessionId)
                 ? { persistedSessionId: nextSessionState.displayId ?? nextSessionState.legacySessionId }
                 : {}),
-              sessionReused: runtimeForAdapter.sessionId != null || runtimeForAdapter.sessionDisplayId != null,
-              taskSessionReused: taskSessionForRun != null,
-              freshSession: runtimeForAdapter.sessionId == null && runtimeForAdapter.sessionDisplayId == null,
-              sessionRotated: sessionCompaction.rotate,
-              sessionRotationReason: sessionCompaction.reason,
+              sessionReused:
+                effectiveRuntimeForAdapter.sessionId != null || effectiveRuntimeForAdapter.sessionDisplayId != null,
+              taskSessionReused,
+              freshSession:
+                effectiveRuntimeForAdapter.sessionId == null && effectiveRuntimeForAdapter.sessionDisplayId == null,
+              sessionRotated,
+              sessionRotationReason,
               provider: readNonEmptyString(adapterResult.provider) ?? "unknown",
               biller: resolveLedgerBiller(adapterResult),
               model: readNonEmptyString(adapterResult.model) ?? "unknown",
@@ -4003,7 +4155,13 @@ export function heartbeatService(db: Db) {
           : null;
 
       const persistedResultJson = mergeHeartbeatRunResultJson(
-        adapterResult.resultJson ?? null,
+        attachAdapterRouteMetadata(adapterResult.resultJson ?? null, {
+          primaryAdapterType,
+          effectiveAdapterType,
+          fallbackTriggered,
+          fallbackErrorCode,
+          fallbackErrorMessage,
+        }),
         adapterResult.summary ?? null,
       );
 
@@ -4074,20 +4232,20 @@ export function heartbeatService(db: Db) {
       }
 
       if (finalizedRun) {
-        await updateRuntimeState(agent, finalizedRun, adapterResult, {
+        await updateRuntimeState(effectiveAgent, finalizedRun, adapterResult, {
           legacySessionId: nextSessionState.legacySessionId,
         }, normalizedUsage);
         if (taskKey) {
           if (adapterResult.clearSession || (!nextSessionState.params && !nextSessionState.displayId)) {
             await clearTaskSessions(agent.companyId, agent.id, {
               taskKey,
-              adapterType: agent.adapterType,
+              adapterType: effectiveAdapterType,
             });
           } else {
             await upsertTaskSession({
               companyId: agent.companyId,
               agentId: agent.id,
-              adapterType: agent.adapterType,
+              adapterType: effectiveAdapterType,
               taskKey,
               sessionParamsJson: nextSessionState.params,
               sessionDisplayId: nextSessionState.displayId,

@@ -22,7 +22,7 @@ console.log(JSON.stringify({
   type: "system",
   subtype: "init",
   session_id: "gemini-session-1",
-  model: "gemini-2.5-pro",
+  model: "gemini-3.1-pro-preview",
 }));
 console.log(JSON.stringify({
   type: "assistant",
@@ -34,6 +34,15 @@ console.log(JSON.stringify({
   session_id: "gemini-session-1",
   result: "ok",
 }));
+`;
+  await fs.writeFile(commandPath, script, "utf8");
+  await fs.chmod(commandPath, 0o755);
+}
+
+async function writeQuotaGeminiCommand(commandPath: string): Promise<void> {
+  const script = `#!/usr/bin/env node
+console.error("TerminalQuotaError: status=error code=429 reason=QUOTA_EXHAUSTED");
+process.exit(1);
 `;
   await fs.writeFile(commandPath, script, "utf8");
   await fs.chmod(commandPath, 0o755);
@@ -76,7 +85,7 @@ describe("gemini execute", () => {
         config: {
           command: commandPath,
           cwd: workspace,
-          model: "gemini-2.5-pro",
+          model: "gemini-3.1-pro-preview",
           env: {
             PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
           },
@@ -199,7 +208,7 @@ describe("gemini execute", () => {
         config: {
           command: commandPath,
           cwd: workspace,
-          model: "gemini-2.5-pro",
+          model: "gemini-3.1-pro-preview",
           env: {
             PAPERCLIP_TEST_CAPTURE_PATH: capturePath,
           },
@@ -264,5 +273,44 @@ describe("gemini execute", () => {
       }
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("returns a structured quota exhaustion error code", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-gemini-quota-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "gemini");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeQuotaGeminiCommand(commandPath);
+
+    const result = await execute({
+      runId: "run-quota",
+      agent: {
+        id: "agent-1",
+        companyId: "company-1",
+        name: "Gemini Coder",
+        adapterType: "gemini_local",
+        adapterConfig: {},
+      },
+      runtime: {
+        sessionId: null,
+        sessionParams: null,
+        sessionDisplayId: null,
+        taskKey: null,
+      },
+      config: {
+        command: commandPath,
+        cwd: workspace,
+        model: "gemini-3.1-pro-preview",
+      },
+      context: {},
+      authToken: "run-jwt-token",
+      onLog: async () => {},
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.errorCode).toBe("gemini_quota_exhausted");
+    expect(result.errorMessage).toContain("QUOTA_EXHAUSTED");
+
+    await fs.rm(root, { recursive: true, force: true });
   });
 });

@@ -6,7 +6,12 @@ import { printGeminiStreamEvent } from "@paperclipai/adapter-gemini-local/cli";
 describe("gemini_local parser", () => {
   it("extracts session, summary, usage, cost, and terminal error message", () => {
     const stdout = [
-      JSON.stringify({ type: "system", subtype: "init", session_id: "gemini-session-1", model: "gemini-2.5-pro" }),
+      JSON.stringify({
+        type: "system",
+        subtype: "init",
+        session_id: "gemini-session-1",
+        model: "gemini-3.1-pro-preview",
+      }),
       JSON.stringify({
         type: "assistant",
         message: {
@@ -149,7 +154,12 @@ describe("gemini_local cli formatter", () => {
 
     try {
       printGeminiStreamEvent(
-        JSON.stringify({ type: "system", subtype: "init", session_id: "gemini-session-1", model: "gemini-2.5-pro" }),
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: "gemini-session-1",
+          model: "gemini-3.1-pro-preview",
+        }),
         false,
       );
       printGeminiStreamEvent(

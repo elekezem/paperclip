@@ -25,8 +25,8 @@ providers:
     label: gpt-4.1
   - id: openrouter:openai/codex-5.4
     label: codex-5.4
-  - id: openrouter:google/gemini-2.5-pro
-    label: gemini-2.5-pro
+  - id: openrouter:google/gemini-3.1-pro-preview
+    label: gemini-3.1-pro-preview
 
 defaultTest:
   options:
