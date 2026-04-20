@@ -31,6 +31,30 @@ import {
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
 
+type DesignCapabilityProfile = "builder" | "verifier" | "none";
+
+const DESIGN_CAPABILITY_OPTIONS: Array<{
+  value: DesignCapabilityProfile;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "none",
+    label: "None",
+    description: "Do not auto-attach Zanwei design skills.",
+  },
+  {
+    value: "builder",
+    label: "Builder",
+    description: "Auto-attaches design-dna for design extraction and generation work.",
+  },
+  {
+    value: "verifier",
+    label: "Verifier",
+    description: "Auto-attaches harness-design for browser-level visual QA and correction.",
+  },
+];
+
 function createValuesForAdapterType(
   adapterType: CreateConfigValues["adapterType"],
 ): CreateConfigValues {
@@ -64,6 +88,8 @@ export function NewAgent() {
   const [reportsTo, setReportsTo] = useState<string | null>(null);
   const [configValues, setConfigValues] = useState<CreateConfigValues>(defaultCreateValues);
   const [selectedSkillKeys, setSelectedSkillKeys] = useState<string[]>([]);
+  const [designCapabilityProfile, setDesignCapabilityProfile] =
+    useState<DesignCapabilityProfile>("none");
   const [roleOpen, setRoleOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -181,6 +207,9 @@ export function NewAgent() {
         intervalSec: configValues.intervalSec,
       }),
       budgetMonthlyCents: 0,
+      metadata: {
+        designCapabilityProfile,
+      },
     });
   }
 
@@ -274,6 +303,32 @@ export function NewAgent() {
         />
 
         <div className="border-t border-border px-4 py-4">
+          <div className="space-y-3 border-b border-border pb-4 mb-4">
+            <div>
+              <h2 className="text-sm font-medium">Design capability profile</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Builder auto-attaches <span className="font-mono">design-dna</span>. Verifier auto-attaches <span className="font-mono">harness-design</span>.
+              </p>
+            </div>
+            <label className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Profile</span>
+              <select
+                className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none"
+                value={designCapabilityProfile}
+                onChange={(event) =>
+                  setDesignCapabilityProfile(event.target.value as DesignCapabilityProfile)}
+              >
+                {DESIGN_CAPABILITY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {DESIGN_CAPABILITY_OPTIONS.find((option) => option.value === designCapabilityProfile)?.description}
+            </p>
+          </div>
           <div className="space-y-3">
             <div>
               <h2 className="text-sm font-medium">Company skills</h2>

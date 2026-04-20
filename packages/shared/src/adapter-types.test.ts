@@ -35,4 +35,28 @@ describe("dynamic adapter type validation schemas", () => {
       }).adapterType,
     ).toBe("external_adapter");
   });
+
+  it("accepts the design capability profile metadata contract", () => {
+    expect(
+      createAgentSchema.parse({
+        name: "Design Builder",
+        adapterType: "claude_local",
+        metadata: {
+          designCapabilityProfile: "builder",
+        },
+      }).metadata,
+    ).toEqual({ designCapabilityProfile: "builder" });
+  });
+
+  it("rejects unknown design capability profile metadata values", () => {
+    expect(() =>
+      createAgentSchema.parse({
+        name: "Broken Designer",
+        adapterType: "claude_local",
+        metadata: {
+          designCapabilityProfile: "visual-polisher",
+        },
+      }),
+    ).toThrow("metadata.designCapabilityProfile must be one of builder, verifier, or none");
+  });
 });

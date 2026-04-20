@@ -14,6 +14,11 @@ export interface AgentPermissions {
 }
 
 export type AgentInstructionsBundleMode = "managed" | "external";
+export type DesignCapabilityProfile = "builder" | "verifier" | "none";
+
+export interface AgentMetadata extends Record<string, unknown> {
+  designCapabilityProfile?: DesignCapabilityProfile;
+}
 
 export interface AgentInstructionsFileSummary {
   path: string;
@@ -79,7 +84,7 @@ export interface Agent {
   pausedAt: Date | null;
   permissions: AgentPermissions;
   lastHeartbeatAt: Date | null;
-  metadata: Record<string, unknown> | null;
+  metadata: AgentMetadata | null;
   createdAt: Date;
   updatedAt: Date;
 }

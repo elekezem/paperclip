@@ -44,6 +44,20 @@ const adapterConfigSchema = z.record(z.unknown()).superRefine((value, ctx) => {
   }
 });
 
+const designCapabilityProfileSchema = z.enum(["builder", "verifier", "none"]);
+
+const agentMetadataSchema = z.record(z.unknown()).superRefine((value, ctx) => {
+  const rawProfile = value.designCapabilityProfile;
+  if (rawProfile === undefined) return;
+  const parsed = designCapabilityProfileSchema.safeParse(rawProfile);
+  if (parsed.success) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "metadata.designCapabilityProfile must be one of builder, verifier, or none",
+    path: ["designCapabilityProfile"],
+  });
+});
+
 export const createAgentSchema = z.object({
   name: z.string().min(1),
   role: z.enum(AGENT_ROLES).optional().default("general"),
@@ -57,7 +71,7 @@ export const createAgentSchema = z.object({
   runtimeConfig: z.record(z.unknown()).optional().default({}),
   budgetMonthlyCents: z.number().int().nonnegative().optional().default(0),
   permissions: agentPermissionsSchema.optional(),
-  metadata: z.record(z.unknown()).optional().nullable(),
+  metadata: agentMetadataSchema.optional().nullable(),
 });
 
 export type CreateAgent = z.infer<typeof createAgentSchema>;

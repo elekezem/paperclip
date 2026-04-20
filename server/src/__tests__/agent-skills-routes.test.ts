@@ -382,6 +382,117 @@ describe("agent skill routes", () => {
     );
   });
 
+  it("applies the builder profile default skill when creating an agent", async () => {
+    const res = await request(await createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "Design Builder",
+        role: "engineer",
+        adapterType: "claude_local",
+        adapterConfig: {},
+        metadata: {
+          designCapabilityProfile: "builder",
+        },
+      });
+
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(mockAgentService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        adapterConfig: expect.objectContaining({
+          paperclipSkillSync: expect.objectContaining({
+            desiredSkills: expect.arrayContaining([
+              "paperclipai/paperclip/paperclip",
+              "zanwei/design-dna/design-dna",
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("merges the builder profile default with manually selected skills", async () => {
+    const res = await request(await createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "Design Builder",
+        role: "engineer",
+        adapterType: "claude_local",
+        desiredSkills: ["custom-visual-skill"],
+        adapterConfig: {},
+        metadata: {
+          designCapabilityProfile: "builder",
+        },
+      });
+
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(mockAgentService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        adapterConfig: expect.objectContaining({
+          paperclipSkillSync: expect.objectContaining({
+            desiredSkills: expect.arrayContaining([
+              "paperclipai/paperclip/paperclip",
+              "custom-visual-skill",
+              "zanwei/design-dna/design-dna",
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("lets explicit empty desired skills override profile defaults", async () => {
+    const res = await request(await createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "Design Builder",
+        role: "engineer",
+        adapterType: "claude_local",
+        desiredSkills: [],
+        adapterConfig: {},
+        metadata: {
+          designCapabilityProfile: "builder",
+        },
+      });
+
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(mockAgentService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        adapterConfig: expect.objectContaining({
+          paperclipSkillSync: expect.objectContaining({
+            desiredSkills: ["paperclipai/paperclip/paperclip"],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not inject profile defaults for openclaw gateway agents", async () => {
+    const res = await request(await createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "Gateway Architect",
+        role: "engineer",
+        adapterType: "openclaw_gateway",
+        adapterConfig: {},
+        metadata: {
+          designCapabilityProfile: "builder",
+        },
+      });
+
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(mockAgentService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.not.objectContaining({
+        adapterConfig: expect.objectContaining({
+          paperclipSkillSync: expect.anything(),
+        }),
+      }),
+    );
+  });
+
   it("materializes a managed AGENTS.md for directly created local agents", async () => {
     const res = await request(await createApp())
       .post("/api/companies/company-1/agents")
@@ -495,6 +606,33 @@ describe("agent skill routes", () => {
           requestedConfigurationSnapshot: expect.objectContaining({
             desiredSkills: ["paperclipai/paperclip/paperclip"],
           }),
+        }),
+      }),
+    );
+  });
+
+  it("applies the verifier profile default skill in hire approvals", async () => {
+    const res = await request(await createApp(createDb(true)))
+      .post("/api/companies/company-1/agent-hires")
+      .send({
+        name: "Visual QA",
+        role: "engineer",
+        adapterType: "claude_local",
+        adapterConfig: {},
+        metadata: {
+          designCapabilityProfile: "verifier",
+        },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(mockApprovalService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          desiredSkills: expect.arrayContaining([
+            "paperclipai/paperclip/paperclip",
+            "zanwei/harness-design/harness-design",
+          ]),
         }),
       }),
     );
