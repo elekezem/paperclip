@@ -255,6 +255,19 @@ export function tradingRoutes(_db: Db) {
     }
   });
 
+  router.post("/trading/companies/:companyId/demo/reset", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    try {
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/reset`, {
+        method: "POST",
+        body: JSON.stringify(req.body ?? {}),
+      }));
+    } catch (error) {
+      sendKernelError(res, error);
+    }
+  });
+
   router.get("/trading/companies/:companyId/demo/auto-trading/status", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
