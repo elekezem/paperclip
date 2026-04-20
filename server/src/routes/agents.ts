@@ -73,6 +73,10 @@ import {
   loadDefaultAgentInstructionsBundle,
   resolveDefaultAgentInstructionsBundleRole,
 } from "../services/default-agent-instructions.js";
+import {
+  readDesignCapabilityProfile,
+  resolveDesignCapabilityDefaultSkillKeys,
+} from "../services/design-capability-policy.js";
 import { getTelemetryClient } from "../telemetry.js";
 
 export function agentRoutes(db: Db) {
@@ -730,8 +734,20 @@ export function agentRoutes(db: Db) {
     adapterType: string,
     adapterConfig: Record<string, unknown>,
     requestedDesiredSkills: string[] | undefined,
+    metadata: unknown,
   ) {
-    if (!requestedDesiredSkills) {
+    const designCapabilityProfile = readDesignCapabilityProfile(metadata);
+    const profileDefaultSkills = resolveDesignCapabilityDefaultSkillKeys(
+      designCapabilityProfile,
+      adapterType,
+    );
+    const effectiveRequestedSkills = requestedDesiredSkills === undefined
+      ? (profileDefaultSkills.length > 0 ? profileDefaultSkills : undefined)
+      : requestedDesiredSkills.length === 0
+        ? []
+        : Array.from(new Set([...profileDefaultSkills, ...requestedDesiredSkills]));
+
+    if (effectiveRequestedSkills === undefined) {
       return {
         adapterConfig,
         desiredSkills: null as string[] | null,
@@ -741,7 +757,7 @@ export function agentRoutes(db: Db) {
 
     const resolvedRequestedSkills = await companySkills.resolveRequestedSkillKeys(
       companyId,
-      requestedDesiredSkills,
+      effectiveRequestedSkills,
     );
     const runtimeSkillEntries = await companySkills.listRuntimeSkillEntries(companyId, {
       materializeMissing: shouldMaterializeRuntimeSkillsForAdapter(adapterType),
@@ -956,6 +972,7 @@ export function agentRoutes(db: Db) {
         agent.adapterType,
         agent.adapterConfig as Record<string, unknown>,
         requestedSkills,
+        agent.metadata,
       );
       if (!desiredSkills || !runtimeSkillEntries) {
         throw unprocessable("Skill sync requires desiredSkills.");
@@ -1390,6 +1407,7 @@ export function agentRoutes(db: Db) {
       hireInput.adapterType,
       requestedAdapterConfig,
       Array.isArray(requestedDesiredSkills) ? requestedDesiredSkills : undefined,
+      hireInput.metadata,
     );
     const normalizedAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
       companyId,
@@ -1556,6 +1574,7 @@ export function agentRoutes(db: Db) {
       createInput.adapterType,
       requestedAdapterConfig,
       Array.isArray(requestedDesiredSkills) ? requestedDesiredSkills : undefined,
+      createInput.metadata,
     );
     const normalizedAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
       companyId,
