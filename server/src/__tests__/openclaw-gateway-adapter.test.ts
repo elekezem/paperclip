@@ -585,6 +585,35 @@ describe("openclaw gateway adapter execute", () => {
     }
   });
 
+  it("uses the configured claimed key path when no run-scoped Paperclip token is injected", async () => {
+    const gateway = await createMockGatewayServer();
+
+    try {
+      await execute(
+        buildContext({
+          url: gateway.url,
+          headers: {
+            "x-openclaw-token": "gateway-token",
+          },
+          claimedApiKeyPath: "/tmp/paperclip-claims/billing-and-license-operator.json",
+          waitTimeoutMs: 2000,
+        }),
+      );
+
+      const payload = gateway.getAgentPayload();
+      const message = String(payload?.message ?? "");
+      expect(message).toContain(
+        "PAPERCLIP_API_KEY=<token from /tmp/paperclip-claims/billing-and-license-operator.json>",
+      );
+      expect(message).toContain(
+        "Load PAPERCLIP_API_KEY from /tmp/paperclip-claims/billing-and-license-operator.json",
+      );
+      expect(message).not.toContain("~/.openclaw/workspace/paperclip-claimed-api-key.json");
+    } finally {
+      await gateway.close();
+    }
+  });
+
   it("fails fast when url is missing", async () => {
     const result = await execute(buildContext({}));
     expect(result.exitCode).toBe(1);
