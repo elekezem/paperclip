@@ -1096,13 +1096,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const payloadTemplate = parseObject(ctx.config.payloadTemplate);
   const transportHint = nonEmpty(ctx.config.streamTransport) ?? nonEmpty(ctx.config.transport);
-  const hasStructuredWakePayload = asRecord(ctx.context.paperclipWake) !== null;
   const attachPaperclipPayload =
     parseBoolean(ctx.config.attachPaperclipPayload, false)
-    || parseBoolean(ctx.config.includePaperclipPayload, false)
-    // Preserve structured Paperclip issue context by default when this run
-    // already carries a wake payload.
-    || hasStructuredWakePayload;
+    || parseBoolean(ctx.config.includePaperclipPayload, false);
 
   const headers = toStringRecord(ctx.config.headers);
   const authToken = resolveAuthToken(parseObject(ctx.config), headers);

@@ -396,7 +396,7 @@ describe("openclaw gateway ui stdout parser", () => {
 });
 
 describe("openclaw gateway adapter execute", () => {
-  it("runs connect -> agent -> agent.wait and forwards wake payload", async () => {
+  it("runs connect -> agent -> agent.wait and forwards wake payload without attaching a root-level paperclip payload by default", async () => {
     const gateway = await createMockGatewayServer();
     const logs: string[] = [];
 
@@ -502,14 +502,55 @@ describe("openclaw gateway adapter execute", () => {
       );
       expect(String(payload?.message ?? "")).toContain("First comment");
       expect(String(payload?.message ?? "")).toContain("\"commentIds\":[\"comment-1\",\"comment-2\"]");
-      expect(payload?.paperclip).toMatchObject({
+      expect(payload?.paperclip).toBeUndefined();
+
+      expect(logs.some((entry) => entry.includes("[openclaw-gateway:event] run=run-123 stream=assistant"))).toBe(true);
+    } finally {
+      await gateway.close();
+    }
+  });
+
+  it("attaches the root-level paperclip payload only when explicitly enabled", async () => {
+    const gateway = await createMockGatewayServer();
+
+    try {
+      const result = await execute(
+        buildContext(
+          {
+            url: gateway.url,
+            waitTimeoutMs: 2000,
+            attachPaperclipPayload: true,
+          },
+          {
+            context: {
+              taskId: "task-123",
+              issueId: "issue-123",
+              wakeReason: "issue_assigned",
+              issueIds: ["issue-123"],
+              paperclipWake: {
+                reason: "issue_commented",
+                issue: {
+                  id: "issue-123",
+                  identifier: "PAP-874",
+                  title: "chat-speed issues",
+                  status: "in_progress",
+                  priority: "medium",
+                },
+                latestCommentId: "comment-2",
+                commentIds: ["comment-1", "comment-2"],
+              },
+            },
+          },
+        ),
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(gateway.getAgentPayload()?.paperclip).toMatchObject({
         wake: {
           latestCommentId: "comment-2",
           commentIds: ["comment-1", "comment-2"],
         },
       });
-
-      expect(logs.some((entry) => entry.includes("[openclaw-gateway:event] run=run-123 stream=assistant"))).toBe(true);
     } finally {
       await gateway.close();
     }
