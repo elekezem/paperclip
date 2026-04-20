@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Response } from "express";
 import type { Db } from "@paperclipai/db";
 import { assertCompanyAccess } from "./authz.js";
 
@@ -18,8 +18,17 @@ async function proxyKernel(pathname: string, init?: RequestInit) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    const error = new Error(errorText || `Trading Kernel request failed: ${response.status}`);
-    Object.assign(error, { status: response.status });
+    let payload: unknown = null;
+    try {
+      payload = errorText ? JSON.parse(errorText) : null;
+    } catch {
+      payload = errorText ? { error: errorText } : null;
+    }
+    const error = new Error((payload as { error?: string } | null)?.error || errorText || `Trading Kernel request failed: ${response.status}`);
+    Object.assign(error, {
+      status: response.status,
+      payload,
+    });
     throw error;
   }
 
@@ -30,10 +39,27 @@ async function proxyKernel(pathname: string, init?: RequestInit) {
   return response.json();
 }
 
+function sendKernelError(res: Response, error: unknown) {
+  const status = Number((error as { status?: number }).status ?? 500);
+  const payload = (error as { payload?: unknown }).payload;
+  if (payload && typeof payload === "object") {
+    res.status(status).json(payload);
+    return;
+  }
+  res.status(status).json({
+    error: error instanceof Error ? error.message : "Trading Kernel request failed",
+  });
+}
+
 function readFallback(companyId: string, kind: "mission-control" | "dashboard" | "demo-status" | "demo-campaign") {
   const demoCampaignFallback = {
     enabled: false,
     effectiveStatus: "disabled",
+    riskProfile: "aggressive_daytrade_v1",
+    positionAccounting: {
+      model: "net_fill_effect_v1",
+      source: "normalized_fill_effects",
+    },
     budgetUsd: 0,
     targetUsd: 0,
     metrics: {
@@ -47,6 +73,14 @@ function readFallback(companyId: string, kind: "mission-control" | "dashboard" |
       openPositionCount: 0,
       openPositions: [],
     },
+    walletVsLedgerDiff: {
+      available: false,
+      outOfSync: false,
+      maxUsdDiff: 0,
+      thresholdQty: 0.000001,
+      thresholdUsd: 0.5,
+      entries: [],
+    },
     error: "Trading Kernel not available",
   };
   const autoTradingFallback = {
@@ -56,6 +90,8 @@ function readFallback(companyId: string, kind: "mission-control" | "dashboard" |
     lastCycleAt: null,
     lastDecisionAt: null,
     lastError: "Trading Kernel not available",
+    lastExchangeError: null,
+    errorClassification: null,
     lastAction: null,
   };
   const startupFlattenFallback = {
@@ -148,7 +184,7 @@ export function tradingRoutes(_db: Db) {
         res.json(readFallback(companyId, "mission-control"));
         return;
       }
-      throw error;
+      sendKernelError(res, error);
     }
   });
 
@@ -162,7 +198,7 @@ export function tradingRoutes(_db: Db) {
         res.json(readFallback(companyId, "dashboard"));
         return;
       }
-      throw error;
+      sendKernelError(res, error);
     }
   });
 
@@ -170,7 +206,11 @@ export function tradingRoutes(_db: Db) {
     router.get(`/trading/companies/:companyId/${route}`, async (req, res) => {
       const companyId = req.params.companyId as string;
       assertCompanyAccess(req, companyId);
-      res.json(await proxyKernel(`/api/companies/${companyId}/${route}`));
+      try {
+        res.json(await proxyKernel(`/api/companies/${companyId}/${route}`));
+      } catch (error) {
+        sendKernelError(res, error);
+      }
     });
   }
 
@@ -184,7 +224,7 @@ export function tradingRoutes(_db: Db) {
         res.json(readFallback(companyId, "demo-status"));
         return;
       }
-      throw error;
+      sendKernelError(res, error);
     }
   });
 
@@ -198,60 +238,84 @@ export function tradingRoutes(_db: Db) {
         res.json(readFallback(companyId, "demo-campaign"));
         return;
       }
-      throw error;
+      sendKernelError(res, error);
     }
   });
 
   router.put("/trading/companies/:companyId/demo/campaign", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    res.json(await proxyKernel(`/api/companies/${companyId}/demo/campaign`, {
-      method: "PUT",
-      body: JSON.stringify(req.body ?? {}),
-    }));
+    try {
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/campaign`, {
+        method: "PUT",
+        body: JSON.stringify(req.body ?? {}),
+      }));
+    } catch (error) {
+      sendKernelError(res, error);
+    }
   });
 
   router.get("/trading/companies/:companyId/demo/auto-trading/status", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    res.json(await proxyKernel(`/api/companies/${companyId}/demo/auto-trading/status`));
+    try {
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/auto-trading/status`));
+    } catch (error) {
+      sendKernelError(res, error);
+    }
   });
 
   for (const action of ["start", "stop", "cycle"] as const) {
     router.post(`/trading/companies/:companyId/demo/auto-trading/${action}`, async (req, res) => {
       const companyId = req.params.companyId as string;
       assertCompanyAccess(req, companyId);
-      res.json(await proxyKernel(`/api/companies/${companyId}/demo/auto-trading/${action}`, {
-        method: "POST",
-        body: JSON.stringify(req.body ?? {}),
-      }));
+      try {
+        res.json(await proxyKernel(`/api/companies/${companyId}/demo/auto-trading/${action}`, {
+          method: "POST",
+          body: JSON.stringify(req.body ?? {}),
+        }));
+      } catch (error) {
+        sendKernelError(res, error);
+      }
     });
   }
 
   router.post("/trading/companies/:companyId/demo/orders", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
-    res.json(await proxyKernel(`/api/companies/${companyId}/demo/orders`, {
-      method: "POST",
-      body: JSON.stringify(req.body ?? {}),
-    }));
+    try {
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/orders`, {
+        method: "POST",
+        body: JSON.stringify(req.body ?? {}),
+      }));
+    } catch (error) {
+      sendKernelError(res, error);
+    }
   });
 
   router.get("/trading/companies/:companyId/demo/orders/:orderId", async (req, res) => {
     const companyId = req.params.companyId as string;
     const orderId = req.params.orderId as string;
     assertCompanyAccess(req, companyId);
-    res.json(await proxyKernel(`/api/companies/${companyId}/demo/orders/${orderId}`));
+    try {
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/orders/${orderId}`));
+    } catch (error) {
+      sendKernelError(res, error);
+    }
   });
 
   router.post("/trading/companies/:companyId/demo/orders/:orderId/cancel", async (req, res) => {
     const companyId = req.params.companyId as string;
     const orderId = req.params.orderId as string;
     assertCompanyAccess(req, companyId);
-    res.json(await proxyKernel(`/api/companies/${companyId}/demo/orders/${orderId}/cancel`, {
-      method: "POST",
-      body: JSON.stringify(req.body ?? {}),
-    }));
+    try {
+      res.json(await proxyKernel(`/api/companies/${companyId}/demo/orders/${orderId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify(req.body ?? {}),
+      }));
+    } catch (error) {
+      sendKernelError(res, error);
+    }
   });
 
   return router;
