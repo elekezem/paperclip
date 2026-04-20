@@ -1139,6 +1139,20 @@ function shouldAutoCheckoutIssueForWake(input: {
   return true;
 }
 
+function autoCheckoutExpectedStatusesForWake(
+  issueStatus: string | null,
+): Array<"todo" | "backlog" | "blocked" | "in_progress"> {
+  const statuses: Array<"todo" | "backlog" | "blocked" | "in_progress"> = [
+    "todo",
+    "backlog",
+    "blocked",
+  ];
+  if (readNonEmptyString(issueStatus) === "in_progress") {
+    statuses.push("in_progress");
+  }
+  return statuses;
+}
+
 function isCheckoutConflictError(error: unknown): boolean {
   return error instanceof HttpError && error.status === 409 && error.message === "Issue checkout conflict";
 }
@@ -3343,7 +3357,12 @@ export function heartbeatService(db: Db) {
       })
     ) {
       try {
-        await issuesSvc.checkout(issueId, agent.id, ["todo", "backlog", "blocked"], run.id);
+        await issuesSvc.checkout(
+          issueId,
+          agent.id,
+          autoCheckoutExpectedStatusesForWake(issueContext.status),
+          run.id,
+        );
         context[PAPERCLIP_HARNESS_CHECKOUT_KEY] = true;
       } catch (error) {
         if (!isCheckoutConflictError(error)) throw error;

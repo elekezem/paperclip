@@ -721,6 +721,40 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     }
   });
 
+  it("adopts stale checkout ownership when a continuation retry resumes in-progress work", async () => {
+    const { agentId, issueId, runId } = await seedStrandedIssueFixture({
+      status: "in_progress",
+      runStatus: "failed",
+    });
+    const heartbeat = heartbeatService(db);
+
+    const result = await heartbeat.reconcileStrandedAssignedIssues();
+    expect(result.dispatchRequeued).toBe(0);
+    expect(result.continuationRequeued).toBe(1);
+    expect(result.escalated).toBe(0);
+    expect(result.issueIds).toEqual([issueId]);
+
+    const runs = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.agentId, agentId));
+    expect(runs).toHaveLength(2);
+
+    const retryRun = runs.find((row) => row.id !== runId);
+    expect(retryRun?.id).toBeTruthy();
+    if (retryRun) {
+      await waitForRunToSettle(heartbeat, retryRun.id);
+    }
+
+    const issue = await db
+      .select()
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .then((rows) => rows[0] ?? null);
+    expect(issue?.checkoutRunId).toBe(retryRun?.id ?? null);
+    expect(issue?.executionRunId).toBeNull();
+  });
+
   it("blocks stranded in-progress work after the continuation retry was already used", async () => {
     const { issueId } = await seedStrandedIssueFixture({
       status: "in_progress",
