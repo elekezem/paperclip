@@ -22,7 +22,6 @@ import { ActivityRow } from "../components/ActivityRow";
 import { Identity } from "../components/Identity";
 import { CompanyLaneChips } from "../components/CompanyLaneChips";
 import { ExecutionWorkspaceChip } from "../components/ExecutionWorkspaceChip";
-import { timeAgo } from "../lib/timeAgo";
 import { cn, formatCents } from "../lib/utils";
 import { Bot, CircleDot, DollarSign, ShieldCheck, LayoutDashboard, PauseCircle, ArrowRight, GitBranch } from "lucide-react";
 import { ActiveAgentsPanel } from "../components/ActiveAgentsPanel";
@@ -44,6 +43,43 @@ const dashboardPriorityRank: Record<Issue["priority"], number> = {
   medium: 2,
   low: 3,
 };
+
+function humanizeTradingKey(value: string | null | undefined): string {
+  return String(value ?? "")
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
+function tradingStatusClass(status: string): string {
+  switch (status) {
+    case "healthy":
+    case "completed":
+    case "active":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+    case "blocked":
+      return "border-red-500/30 bg-red-500/10 text-red-200";
+    case "degraded":
+    case "warning":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+    default:
+      return "border-border bg-background text-muted-foreground";
+  }
+}
+
+function tradingSeverityClass(severity: string): string {
+  switch (severity) {
+    case "high":
+    case "critical":
+      return "border-red-500/30 bg-red-500/10 text-red-200";
+    case "warning":
+    case "medium":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+    default:
+      return "border-sky-500/30 bg-sky-500/10 text-sky-200";
+  }
+}
 
 export function Dashboard() {
   const { selectedCompanyId, selectedCompany, companies } = useCompany();
@@ -143,6 +179,35 @@ export function Dashboard() {
       })
       .slice(0, 5);
   }, [issues]);
+  const tradingMission = data?.tradingMission ?? null;
+  const tradingActivities = useMemo(
+    () => (tradingMission?.latestTradingActivities ?? []).slice(0, 10),
+    [tradingMission],
+  );
+  const tradingIssues = useMemo(
+    () => (tradingMission?.openTradingIssues ?? []).slice(0, 8),
+    [tradingMission],
+  );
+  const tradingWorkspaces = useMemo(
+    () => (tradingMission?.executionWorkspaces ?? []).slice(0, 8),
+    [tradingMission],
+  );
+  const tradingRuns = useMemo(
+    () => (tradingMission?.activeRuns ?? []).slice(0, 6),
+    [tradingMission],
+  );
+  const tradingRoutineHealth = useMemo(
+    () => (tradingMission?.routineHealth ?? []).slice(0, 6),
+    [tradingMission],
+  );
+  const tradingRevisions = useMemo(
+    () => (tradingMission?.strategyRevisions ?? []).slice(0, 6),
+    [tradingMission],
+  );
+  const tradingResearchOutputs = useMemo(
+    () => (tradingMission?.researchOutputs ?? []).slice(0, 6),
+    [tradingMission],
+  );
 
   useEffect(() => {
     for (const timer of activityAnimationTimersRef.current) {
@@ -245,6 +310,20 @@ export function Dashboard() {
   }
 
   const hasNoAgents = agents !== undefined && agents.length === 0;
+  const hasTradingMission = Boolean(tradingMission?.enabled);
+  const heroLiveValue = hasTradingMission ? tradingMission!.liveCount : (data?.agents.running ?? 0);
+  const heroLiveLabel = hasTradingMission ? "Live trading" : t("sidebar.agents");
+  const heroLiveDescription = hasTradingMission
+    ? `${tradingMission?.campaignSnapshot?.autoTradingStatus ?? "inactive"} · ${tradingRuns.length} active runs`
+    : `${data?.agents.paused ?? 0} ${t("common.paused").toLowerCase()} · ${data?.agents.error ?? 0} error`;
+  const heroQueueValue = hasTradingMission ? tradingMission!.queueCount : (data?.tasks.inProgress ?? 0);
+  const heroQueueDescription = hasTradingMission
+    ? `${tradingIssues.length} blockers open`
+    : `${data?.tasks.open ?? 0} open · ${data?.tasks.blocked ?? 0} blocked`;
+  const heroWorkspaceValue = hasTradingMission ? tradingMission!.activeWorkspaceCount : activeExecutionWorkspaces.length;
+  const heroWorkspaceDescription = hasTradingMission
+    ? `${tradingWorkspaces.filter((workspace) => workspace.status === "active").length} active research or diagnosis workspaces`
+    : "Execution workspaces currently attached to delivery";
 
   return (
     <div className="space-y-6">
@@ -375,19 +454,19 @@ export function Dashboard() {
 
               <div className="mt-5 grid gap-2 sm:grid-cols-3">
                 <div className="rounded-xl border border-border/70 bg-background/80 px-3 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t("sidebar.agents")}</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">{data.agents.running}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{data.agents.paused} {t("common.paused").toLowerCase()} · {data.agents.error} error</p>
+                  <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{heroLiveLabel}</p>
+                  <p className="mt-1 text-2xl font-semibold tabular-nums">{heroLiveValue}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{heroLiveDescription}</p>
                 </div>
                 <div className="rounded-xl border border-border/70 bg-background/80 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t("common.opsQueue")}</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">{data.tasks.inProgress}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{data.tasks.open} open · {data.tasks.blocked} blocked</p>
+                  <p className="mt-1 text-2xl font-semibold tabular-nums">{heroQueueValue}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{heroQueueDescription}</p>
                 </div>
                 <div className="rounded-xl border border-border/70 bg-background/80 px-3 py-3">
                   <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t("dashboard.activeWorktrees")}</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">{activeExecutionWorkspaces.length}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Execution workspaces currently attached to delivery</p>
+                  <p className="mt-1 text-2xl font-semibold tabular-nums">{heroWorkspaceValue}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{heroWorkspaceDescription}</p>
                 </div>
               </div>
 
@@ -418,7 +497,36 @@ export function Dashboard() {
                 </Link>
               </div>
 
-              {hotIssues.length === 0 ? (
+              {hasTradingMission ? (
+                tradingIssues.length === 0 ? (
+                  <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-sm text-muted-foreground">
+                    No open trading blockers.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-2">
+                    {tradingIssues.map((issue) => (
+                      <div
+                        key={issue.issueId}
+                        className="block rounded-xl border border-border/70 px-3 py-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{issue.title}</p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <span>{humanizeTradingKey(issue.agentKey)}</span>
+                              <span>{formatRelativeTime(issue.updatedAt)}</span>
+                            </div>
+                          </div>
+                          <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]", tradingSeverityClass(issue.severity))}>
+                            {issue.severity}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">{issue.summary}</p>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : hotIssues.length === 0 ? (
                 <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-sm text-muted-foreground">
                   No active issues.
                 </div>
@@ -472,52 +580,177 @@ export function Dashboard() {
                 {t("dashboard.operationsPulse")}
               </p>
               <div className="mt-4 space-y-3">
-                <div className="rounded-xl border border-border/70 px-3 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-muted-foreground">{t("approvals.pending")}</span>
-                    <ShieldCheck className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">
-                    {data.pendingApprovals + data.budgets.pendingApprovals}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-border/70 px-3 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-muted-foreground">Month spend</span>
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">{formatCents(data.costs.monthSpendCents)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {data.costs.monthBudgetCents > 0
-                      ? `${data.costs.monthUtilizationPercent}% of ${formatCents(data.costs.monthBudgetCents)}`
-                      : "Unlimited budget"}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-border/70 px-3 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-muted-foreground">Budget incidents</span>
-                    <PauseCircle className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">{data.budgets.activeIncidents}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {data.budgets.pausedAgents} agents paused · {data.budgets.pausedProjects} projects paused
-                  </p>
-                </div>
-                <div className="rounded-xl border border-border/70 px-3 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-muted-foreground">{t("dashboard.activeWorktrees")}</span>
-                    <GitBranch className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">{activeExecutionWorkspaces.length}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {activeExecutionWorkspaces.slice(0, 2).map((workspace) => workspace.branchName ?? workspace.name).join(" · ") || "No execution workspaces"}
-                  </p>
-                </div>
+                {hasTradingMission ? (
+                  <>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">Current equity</span>
+                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">${tradingMission?.campaignSnapshot?.currentEquityUsd?.toFixed(2) ?? "0.00"}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {tradingMission?.campaignSnapshot?.autoTradingStatus ?? "inactive"} · {tradingMission?.campaignSnapshot?.effectiveStatus ?? "unknown"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">Active capital</span>
+                        <CircleDot className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">{tradingMission?.campaignSnapshot?.activeCapitalRatioPct ?? 0}%</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {tradingMission?.campaignSnapshot?.openPositionCount ?? 0} open positions
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">Strategy revisions</span>
+                        <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">{tradingRevisions.length}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {tradingRevisions[0]?.status ?? "No recent revisions"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">Research outputs</span>
+                        <GitBranch className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">{tradingResearchOutputs.length}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {tradingWorkspaces.filter((workspace) => workspace.status === "active").length} active workspaces
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">{t("approvals.pending")}</span>
+                        <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">
+                        {data.pendingApprovals + data.budgets.pendingApprovals}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">Month spend</span>
+                        <DollarSign className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">{formatCents(data.costs.monthSpendCents)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {data.costs.monthBudgetCents > 0
+                          ? `${data.costs.monthUtilizationPercent}% of ${formatCents(data.costs.monthBudgetCents)}`
+                          : "Unlimited budget"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">Budget incidents</span>
+                        <PauseCircle className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">{data.budgets.activeIncidents}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {data.budgets.pausedAgents} agents paused · {data.budgets.pausedProjects} projects paused
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-muted-foreground">{t("dashboard.activeWorktrees")}</span>
+                        <GitBranch className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <p className="mt-2 text-2xl font-semibold tabular-nums">{activeExecutionWorkspaces.length}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {activeExecutionWorkspaces.slice(0, 2).map((workspace) => workspace.branchName ?? workspace.name).join(" · ") || "No execution workspaces"}
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
 
-          <ActiveAgentsPanel companyId={selectedCompanyId!} />
+          {hasTradingMission ? (
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="rounded-2xl border border-border/80 p-5">
+                <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">Routine health</p>
+                <div className="mt-4 space-y-2">
+                  {tradingRoutineHealth.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      No routine telemetry yet.
+                    </div>
+                  ) : tradingRoutineHealth.map((routine) => (
+                    <div key={routine.routineKey} className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{routine.title}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{humanizeTradingKey(routine.agentKey)}</p>
+                        </div>
+                        <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]", tradingStatusClass(routine.status))}>
+                          {routine.status}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">{routine.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border/80 p-5">
+                <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">Research runs</p>
+                <div className="mt-4 space-y-2">
+                  {tradingRuns.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      No active research or diagnosis runs.
+                    </div>
+                  ) : tradingRuns.map((run) => (
+                    <div key={run.runId} className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{run.title}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{humanizeTradingKey(run.agentKey)} · {formatRelativeTime(run.startedAt)}</p>
+                        </div>
+                        <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]", tradingStatusClass(run.status))}>
+                          {run.status}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">{run.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border/80 p-5">
+                <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground">Strategy revisions</p>
+                <div className="mt-4 space-y-2">
+                  {tradingRevisions.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      No automatic strategy revision yet.
+                    </div>
+                  ) : tradingRevisions.map((revision) => (
+                    <div key={revision.revisionId} className="rounded-xl border border-border/70 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{revision.summary || humanizeTradingKey(revision.kind)}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{humanizeTradingKey(revision.source)} · {formatRelativeTime(revision.createdAt)}</p>
+                        </div>
+                        <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]", tradingStatusClass(revision.status))}>
+                          {revision.status}
+                        </span>
+                      </div>
+                      {revision.validationErrors.length > 0 ? (
+                        <p className="mt-2 text-sm text-muted-foreground">{revision.validationErrors.join("; ")}</p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <ActiveAgentsPanel companyId={selectedCompanyId!} />
+          )}
 
           {data.budgets.activeIncidents > 0 ? (
             <div className="flex items-start justify-between gap-3 rounded-xl border border-red-500/20 bg-[linear-gradient(180deg,rgba(255,80,80,0.12),rgba(255,255,255,0.02))] px-4 py-3">
@@ -539,73 +772,110 @@ export function Dashboard() {
           ) : null}
 
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-1 sm:gap-2">
-            <MetricCard
-              icon={Bot}
-              value={data.agents.active + data.agents.running + data.agents.paused + data.agents.error}
-              label="Agents Enabled"
-              to="/agents"
-              description={
-                <span>
-                  {data.agents.running} running{", "}
-                  {data.agents.paused} paused{", "}
-                  {data.agents.error} errors
-                </span>
-              }
-            />
-            <MetricCard
-              icon={CircleDot}
-              value={data.tasks.inProgress}
-              label="Tasks In Progress"
-              to="/issues"
-              description={
-                <span>
-                  {data.tasks.open} open{", "}
-                  {data.tasks.blocked} blocked
-                </span>
-              }
-            />
-            <MetricCard
-              icon={DollarSign}
-              value={formatCents(data.costs.monthSpendCents)}
-              label="Month Spend"
-              to="/costs"
-              description={
-                <span>
-                  {data.costs.monthBudgetCents > 0
-                    ? `${data.costs.monthUtilizationPercent}% of ${formatCents(data.costs.monthBudgetCents)} budget`
-                    : "Unlimited budget"}
-                </span>
-              }
-            />
-            <MetricCard
-              icon={ShieldCheck}
-              value={data.pendingApprovals + data.budgets.pendingApprovals}
-              label="Pending Approvals"
-              to="/approvals"
-              description={
-                <span>
-                  {data.budgets.pendingApprovals > 0
-                    ? `${data.budgets.pendingApprovals} budget overrides awaiting board review`
-                    : "Awaiting board review"}
-                </span>
-              }
-            />
+            {hasTradingMission ? (
+              <>
+                <MetricCard
+                  icon={Bot}
+                  value={tradingMission?.liveCount ?? 0}
+                  label="Live Mission"
+                  to="/dashboard"
+                  description={<span>{tradingMission?.campaignSnapshot?.autoTradingStatus ?? "inactive"} auto-trading</span>}
+                />
+                <MetricCard
+                  icon={CircleDot}
+                  value={tradingMission?.queueCount ?? 0}
+                  label="Open Blockers"
+                  to="/dashboard"
+                  description={<span>{tradingIssues.length} issues need follow-through</span>}
+                />
+                <MetricCard
+                  icon={GitBranch}
+                  value={tradingMission?.activeWorkspaceCount ?? 0}
+                  label="Active Workspaces"
+                  to="/dashboard"
+                  description={<span>{tradingWorkspaces.length} visible trading workspaces</span>}
+                />
+                <MetricCard
+                  icon={ShieldCheck}
+                  value={tradingResearchOutputs.length}
+                  label="Research Outputs"
+                  to="/dashboard"
+                  description={<span>{tradingRevisions.length} strategy revisions tracked</span>}
+                />
+              </>
+            ) : (
+              <>
+                <MetricCard
+                  icon={Bot}
+                  value={data.agents.active + data.agents.running + data.agents.paused + data.agents.error}
+                  label="Agents Enabled"
+                  to="/agents"
+                  description={
+                    <span>
+                      {data.agents.running} running{", "}
+                      {data.agents.paused} paused{", "}
+                      {data.agents.error} errors
+                    </span>
+                  }
+                />
+                <MetricCard
+                  icon={CircleDot}
+                  value={data.tasks.inProgress}
+                  label="Tasks In Progress"
+                  to="/issues"
+                  description={
+                    <span>
+                      {data.tasks.open} open{", "}
+                      {data.tasks.blocked} blocked
+                    </span>
+                  }
+                />
+                <MetricCard
+                  icon={DollarSign}
+                  value={formatCents(data.costs.monthSpendCents)}
+                  label="Month Spend"
+                  to="/costs"
+                  description={
+                    <span>
+                      {data.costs.monthBudgetCents > 0
+                        ? `${data.costs.monthUtilizationPercent}% of ${formatCents(data.costs.monthBudgetCents)} budget`
+                        : "Unlimited budget"}
+                    </span>
+                  }
+                />
+                <MetricCard
+                  icon={ShieldCheck}
+                  value={data.pendingApprovals + data.budgets.pendingApprovals}
+                  label="Pending Approvals"
+                  to="/approvals"
+                  description={
+                    <span>
+                      {data.budgets.pendingApprovals > 0
+                        ? `${data.budgets.pendingApprovals} budget overrides awaiting board review`
+                        : "Awaiting board review"}
+                    </span>
+                  }
+                />
+              </>
+            )}
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <ChartCard title="Run Activity" subtitle="Last 14 days">
-              <RunActivityChart runs={runs ?? []} />
-            </ChartCard>
-            <ChartCard title="Issues by Priority" subtitle="Last 14 days">
-              <PriorityChart issues={issues ?? []} />
-            </ChartCard>
-            <ChartCard title="Issues by Status" subtitle="Last 14 days">
-              <IssueStatusChart issues={issues ?? []} />
-            </ChartCard>
-            <ChartCard title="Success Rate" subtitle="Last 14 days">
-              <SuccessRateChart runs={runs ?? []} />
-            </ChartCard>
-          </div>
+          {!hasTradingMission ? (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <ChartCard title="Run Activity" subtitle="Last 14 days">
+                <RunActivityChart runs={runs ?? []} />
+              </ChartCard>
+              <ChartCard title="Issues by Priority" subtitle="Last 14 days">
+                <PriorityChart issues={issues ?? []} />
+              </ChartCard>
+              <ChartCard title="Issues by Status" subtitle="Last 14 days">
+                <IssueStatusChart issues={issues ?? []} />
+              </ChartCard>
+              <ChartCard title="Success Rate" subtitle="Last 14 days">
+                <SuccessRateChart runs={runs ?? []} />
+              </ChartCard>
+            </div>
+          ) : null}
 
           <PluginSlotOutlet
             slotTypes={["dashboardWidget"]}
@@ -615,84 +885,176 @@ export function Dashboard() {
           />
 
           <div className="grid md:grid-cols-2 gap-4">
-            {/* Recent Activity */}
-            {recentActivity.length > 0 && (
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Recent Activity</h3>
-                <div className="border border-border divide-y divide-border overflow-hidden">
-                  {recentActivity.map((event) => (
-                    <ActivityRow
-                      key={event.id}
-                      event={event}
-                      agentMap={agentMap}
-                      entityNameMap={entityNameMap}
-                      entityTitleMap={entityTitleMap}
-                      className={animatedActivityIds.has(event.id) ? "activity-row-enter" : undefined}
-                    />
-                  ))}
+            {hasTradingMission ? (
+              <>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Live Trading Activities</h3>
+                  {tradingActivities.length === 0 ? (
+                    <div className="border border-border p-4">
+                      <p className="text-sm text-muted-foreground">No material trading activity yet.</p>
+                    </div>
+                  ) : (
+                    <div className="border border-border divide-y divide-border overflow-hidden">
+                      {tradingActivities.map((activity) => (
+                        <div key={activity.id} className="px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium">{activity.title}</p>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span>{humanizeTradingKey(activity.source)}</span>
+                                {activity.symbol ? <span>{activity.symbol}</span> : null}
+                                <span>{formatRelativeTime(activity.occurredAt)}</span>
+                              </div>
+                              <p className="mt-2 text-sm text-muted-foreground">{activity.summary}</p>
+                            </div>
+                            <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]", tradingSeverityClass(activity.severity))}>
+                              {activity.severity}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
+
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Workspaces And Outputs</h3>
+                  {tradingWorkspaces.length === 0 && tradingResearchOutputs.length === 0 ? (
+                    <div className="border border-border p-4">
+                      <p className="text-sm text-muted-foreground">No research workspace or advisory output yet.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {tradingWorkspaces.length > 0 ? (
+                        <div className="border border-border divide-y divide-border overflow-hidden">
+                          {tradingWorkspaces.map((workspace) => (
+                            <div key={workspace.workspaceId} className="px-4 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium">{workspace.title}</p>
+                                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                    <span>{humanizeTradingKey(workspace.agentKey)}</span>
+                                    <span>{humanizeTradingKey(workspace.kind)}</span>
+                                    <span>{formatRelativeTime(workspace.updatedAt)}</span>
+                                  </div>
+                                  <p className="mt-2 text-sm text-muted-foreground">{workspace.summary}</p>
+                                </div>
+                                <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]", tradingStatusClass(workspace.status))}>
+                                  {workspace.status}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {tradingResearchOutputs.length > 0 ? (
+                        <div className="rounded-xl border border-border/70 p-4">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Latest advisory outputs</p>
+                          <div className="mt-3 space-y-2">
+                            {tradingResearchOutputs.map((output) => (
+                              <div key={output.outputId} className="rounded-lg border border-border/70 px-3 py-3">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-medium">{output.title}</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">{humanizeTradingKey(output.agentKey)} · {humanizeTradingKey(output.kind)}</p>
+                                  </div>
+                                  <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em]", tradingStatusClass(output.status))}>
+                                    {output.status}
+                                  </span>
+                                </div>
+                                <p className="mt-2 text-sm text-muted-foreground">{output.summary}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Recent Activity */}
+                {recentActivity.length > 0 && (
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Recent Activity</h3>
+                    <div className="border border-border divide-y divide-border overflow-hidden">
+                      {recentActivity.map((event) => (
+                        <ActivityRow
+                          key={event.id}
+                          event={event}
+                          agentMap={agentMap}
+                          entityNameMap={entityNameMap}
+                          entityTitleMap={entityTitleMap}
+                          className={animatedActivityIds.has(event.id) ? "activity-row-enter" : undefined}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent Tasks */}
+                <div className="min-w-0">
+                    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Recent Tasks</h3>
+                  {recentIssues.length === 0 ? (
+                    <div className="border border-border p-4">
+                      <p className="text-sm text-muted-foreground">No tasks yet.</p>
+                    </div>
+                  ) : (
+                    <div className="border border-border divide-y divide-border overflow-hidden">
+                      {recentIssues.slice(0, 10).map((issue) => {
+                        const workspace = issue.currentExecutionWorkspace
+                          ?? (issue.executionWorkspaceId ? workspaceById.get(issue.executionWorkspaceId) ?? null : null);
+
+                        return (
+                          <Link
+                            key={issue.id}
+                            to={`/issues/${issue.identifier ?? issue.id}`}
+                            className="px-4 py-3 text-sm cursor-pointer hover:bg-accent/50 transition-colors no-underline text-inherit block"
+                          >
+                            <div className="flex items-start gap-2 sm:items-center sm:gap-3">
+                            {/* Status icon - left column on mobile */}
+                            <span className="shrink-0 sm:hidden">
+                              <StatusIcon status={issue.status} />
+                            </span>
+
+                            {/* Right column on mobile: title + metadata stacked */}
+                            <span className="flex min-w-0 flex-1 flex-col gap-1 sm:contents">
+                              <span className="line-clamp-2 text-sm sm:order-2 sm:flex-1 sm:min-w-0 sm:line-clamp-none sm:truncate">
+                                {issue.title}
+                              </span>
+                              <span className="flex items-center gap-2 sm:order-1 sm:shrink-0">
+                                <span className="hidden sm:inline-flex"><StatusIcon status={issue.status} /></span>
+                                <span className="text-xs font-mono text-muted-foreground">
+                                  {issue.identifier ?? issue.id.slice(0, 8)}
+                                </span>
+                                {issue.assigneeAgentId && (() => {
+                                  const name = agentName(issue.assigneeAgentId);
+                                  return name
+                                    ? <span className="hidden sm:inline-flex"><Identity name={name} size="sm" /></span>
+                                    : null;
+                                })()}
+                                <span className="text-xs text-muted-foreground sm:hidden">&middot;</span>
+                                <span className="text-xs text-muted-foreground shrink-0 sm:order-last">
+                                  {formatRelativeTime(issue.updatedAt)}
+                                </span>
+                              </span>
+                              {workspace && (
+                                <span className="mt-1 hidden sm:inline-flex">
+                                  <ExecutionWorkspaceChip workspace={workspace} compact />
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
             )}
-
-            {/* Recent Tasks */}
-            <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Recent Tasks</h3>
-              {recentIssues.length === 0 ? (
-                <div className="border border-border p-4">
-                  <p className="text-sm text-muted-foreground">No tasks yet.</p>
-                </div>
-              ) : (
-                <div className="border border-border divide-y divide-border overflow-hidden">
-                  {recentIssues.slice(0, 10).map((issue) => {
-                    const workspace = issue.currentExecutionWorkspace
-                      ?? (issue.executionWorkspaceId ? workspaceById.get(issue.executionWorkspaceId) ?? null : null);
-
-                    return (
-                      <Link
-                        key={issue.id}
-                        to={`/issues/${issue.identifier ?? issue.id}`}
-                        className="px-4 py-3 text-sm cursor-pointer hover:bg-accent/50 transition-colors no-underline text-inherit block"
-                      >
-                        <div className="flex items-start gap-2 sm:items-center sm:gap-3">
-                        {/* Status icon - left column on mobile */}
-                        <span className="shrink-0 sm:hidden">
-                          <StatusIcon status={issue.status} />
-                        </span>
-
-                        {/* Right column on mobile: title + metadata stacked */}
-                        <span className="flex min-w-0 flex-1 flex-col gap-1 sm:contents">
-                          <span className="line-clamp-2 text-sm sm:order-2 sm:flex-1 sm:min-w-0 sm:line-clamp-none sm:truncate">
-                            {issue.title}
-                          </span>
-                          <span className="flex items-center gap-2 sm:order-1 sm:shrink-0">
-                            <span className="hidden sm:inline-flex"><StatusIcon status={issue.status} /></span>
-                            <span className="text-xs font-mono text-muted-foreground">
-                              {issue.identifier ?? issue.id.slice(0, 8)}
-                            </span>
-                            {issue.assigneeAgentId && (() => {
-                              const name = agentName(issue.assigneeAgentId);
-                              return name
-                                ? <span className="hidden sm:inline-flex"><Identity name={name} size="sm" /></span>
-                                : null;
-                            })()}
-                            <span className="text-xs text-muted-foreground sm:hidden">&middot;</span>
-                            <span className="text-xs text-muted-foreground shrink-0 sm:order-last">
-                              {formatRelativeTime(issue.updatedAt)}
-                            </span>
-                          </span>
-                          {workspace && (
-                            <span className="mt-1 hidden sm:inline-flex">
-                              <ExecutionWorkspaceChip workspace={workspace} compact />
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </div>
 
         </>
