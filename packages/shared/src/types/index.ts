@@ -169,7 +169,17 @@ export type {
   InstanceSchedulerHeartbeatAgent,
 } from "./heartbeat.js";
 export type { LiveEvent } from "./live.js";
-export type { DashboardSummary } from "./dashboard.js";
+export type {
+  TradingMissionActivity,
+  TradingMissionIssue,
+  TradingMissionRun,
+  TradingMissionWorkspace,
+  TradingResearchOutput,
+  TradingStrategyRevision,
+  TradingRoutineHealth,
+  TradingMissionSummary,
+  DashboardSummary,
+} from "./dashboard.js";
 export type { ActivityEvent } from "./activity.js";
 export type { SidebarBadges } from "./sidebar-badges.js";
 export type { SidebarOrderPreference } from "./sidebar-preferences.js";

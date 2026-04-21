@@ -95,7 +95,7 @@ export function dashboardService(db: Db) {
         agentCounts[bucket] = (agentCounts[bucket] ?? 0) + count;
       }
 
-      const taskCounts: Record<string, number> = {
+      const taskCounts: DashboardSummary["tasks"] = {
         open: 0,
         inProgress: 0,
         blocked: 0,
