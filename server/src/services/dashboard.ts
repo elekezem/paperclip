@@ -10,11 +10,23 @@ const tradingKernelBaseUrl =
   ?? process.env.TRADING_KERNEL_URL
   ?? "http://127.0.0.1:3231";
 
-async function fetchTradingMission(companyId: string): Promise<TradingMissionSummary | null> {
+const DEFAULT_TRADING_MISSION_FETCH_TIMEOUT_MS = Number(
+  process.env.PAPERCLIP_TRADING_MISSION_FETCH_TIMEOUT_MS ?? 3000,
+);
+
+export async function fetchTradingMission(
+  companyId: string,
+  opts?: {
+    timeoutMs?: number;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<TradingMissionSummary | null> {
+  const timeoutMs = Math.max(1, Number(opts?.timeoutMs ?? DEFAULT_TRADING_MISSION_FETCH_TIMEOUT_MS));
+  const fetchImpl = opts?.fetchImpl ?? fetch;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1200);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(new URL(`/api/companies/${companyId}/mission-control`, tradingKernelBaseUrl), {
+    const response = await fetchImpl(new URL(`/api/companies/${companyId}/mission-control`, tradingKernelBaseUrl), {
       headers: {
         "content-type": "application/json",
       },
