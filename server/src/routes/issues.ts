@@ -65,6 +65,7 @@ import {
   normalizeIssueExecutionPolicy,
   parseIssueExecutionState,
 } from "../services/issue-execution-policy.js";
+import { shouldSuppressAgentCloseoutCommentWake } from "../services/issue-comment-wake-guards.js";
 
 const MAX_ISSUE_COMMENT_LIMIT = 500;
 const updateIssueRouteSchema = updateIssueSchema.extend({
@@ -160,28 +161,6 @@ function shouldImplicitlyReopenCommentForAgent(input: {
   if (typeof input.assigneeAgentId !== "string" || input.assigneeAgentId.length === 0) return false;
   if (input.actorType === "agent" && input.actorId === input.assigneeAgentId) return false;
   return true;
-}
-
-const AGENT_RUN_CLOSEOUT_COMMENT_MARKERS = [
-  "original work complete",
-  "no new action required",
-  "closing issue",
-];
-
-function shouldSuppressAgentCloseoutCommentWake(input: {
-  actorType: "agent" | "user";
-  actorId: string;
-  actorRunId: string | null;
-  assigneeAgentId: string | null | undefined;
-  body: string | null | undefined;
-}) {
-  if (input.actorType !== "agent") return false;
-  if (!input.actorRunId) return false;
-  if (typeof input.assigneeAgentId !== "string" || input.assigneeAgentId.length === 0) return false;
-  if (input.actorId === input.assigneeAgentId) return false;
-
-  const normalizedBody = input.body?.toLowerCase() ?? "";
-  return AGENT_RUN_CLOSEOUT_COMMENT_MARKERS.some((marker) => normalizedBody.includes(marker));
 }
 
 function diffExecutionParticipants(

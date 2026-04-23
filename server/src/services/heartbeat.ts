@@ -40,6 +40,7 @@ import {
   HEARTBEAT_RUN_SAFE_RESULT_JSON_MAX_BYTES,
   mergeHeartbeatRunResultJson,
 } from "./heartbeat-run-summary.js";
+import { isAutomatedAgentCloseoutCommentWake } from "./issue-comment-wake-guards.js";
 import { logActivity, type LogActivityInput } from "./activity-log.js";
 import {
   buildWorkspaceReadyComment,
@@ -4401,6 +4402,7 @@ export function heartbeatService(db: Db) {
           companyId: issues.companyId,
           identifier: issues.identifier,
           status: issues.status,
+          assigneeAgentId: issues.assigneeAgentId,
           executionRunId: issues.executionRunId,
         })
         .from(issues)
@@ -4473,9 +4475,53 @@ export function heartbeatService(db: Db) {
         const deferredContextSeed = parseObject(deferredPayload[DEFERRED_WAKE_CONTEXT_KEY]);
         const promotedContextSeed: Record<string, unknown> = { ...deferredContextSeed };
         const deferredCommentIds = extractWakeCommentIds(deferredContextSeed);
+        const deferredWakeCommentId =
+          deferredCommentIds[deferredCommentIds.length - 1] ??
+          readNonEmptyString(promotedContextSeed.wakeCommentId);
+        const deferredWakeComment = deferredWakeCommentId
+          ? await tx
+              .select({
+                authorAgentId: issueComments.authorAgentId,
+                createdByRunId: issueComments.createdByRunId,
+                body: issueComments.body,
+              })
+              .from(issueComments)
+              .where(
+                and(
+                  eq(issueComments.companyId, issue.companyId),
+                  eq(issueComments.id, deferredWakeCommentId),
+                ),
+              )
+              .then((rows) => rows[0] ?? null)
+          : null;
+        const suppressDeferredCloseoutWake = isAutomatedAgentCloseoutCommentWake({
+          authorAgentId: deferredWakeComment?.authorAgentId,
+          authorRunId: deferredWakeComment?.createdByRunId,
+          assigneeAgentId: issue.assigneeAgentId,
+          body: deferredWakeComment?.body,
+        });
         const shouldReopenDeferredCommentWake =
-          deferredCommentIds.length > 0 && (issue.status === "done" || issue.status === "cancelled");
+          deferredCommentIds.length > 0 &&
+          (issue.status === "done" || issue.status === "cancelled") &&
+          !suppressDeferredCloseoutWake;
         let reopenedActivity: LogActivityInput | null = null;
+
+        if (deferredCommentIds.length > 0 && suppressDeferredCloseoutWake) {
+          const suppressedAt = new Date();
+          await tx
+            .update(agentWakeupRequests)
+            .set({
+              status: "skipped",
+              reason: "agent_closeout_comment_suppressed",
+              runId: null,
+              claimedAt: null,
+              finishedAt: suppressedAt,
+              error: null,
+              updatedAt: suppressedAt,
+            })
+            .where(eq(agentWakeupRequests.id, deferred.id));
+          continue;
+        }
 
         if (shouldReopenDeferredCommentWake) {
           const reopenedFromStatus = issue.status;
