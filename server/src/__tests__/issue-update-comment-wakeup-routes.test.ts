@@ -104,7 +104,7 @@ function registerModuleMocks() {
   }));
 }
 
-async function createApp() {
+async function createApp(actor?: Record<string, unknown>) {
   const [{ errorHandler }, { issueRoutes }] = await Promise.all([
     vi.importActual<typeof import("../middleware/index.js")>("../middleware/index.js"),
     vi.importActual<typeof import("../routes/issues.js")>("../routes/issues.js"),
@@ -112,7 +112,7 @@ async function createApp() {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as any).actor = {
+    (req as any).actor = actor ?? {
       type: "board",
       userId: "local-board",
       companyIds: ["company-1"],
@@ -251,5 +251,37 @@ describe("issue update comment wakeups", () => {
         }),
       }),
     );
+  });
+
+  it("suppresses assignee wakes for automated agent closeout comments", async () => {
+    const existing = makeIssue({
+      assigneeAgentId: ASSIGNEE_AGENT_ID,
+      assigneeUserId: null,
+      status: "in_progress",
+    });
+    const updated = { ...existing };
+    mockIssueService.getById.mockResolvedValue(existing);
+    mockIssueService.update.mockResolvedValue(updated);
+    mockIssueService.addComment.mockResolvedValue({
+      id: "comment-3",
+      issueId: existing.id,
+      companyId: existing.companyId,
+      body: "Original work complete. No new action required. Closing issue.",
+    });
+
+    const res = await request(await createApp({
+      type: "agent",
+      agentId: "agent-closeout",
+      companyId: "company-1",
+      runId: "run-closeout",
+      source: "agent_key",
+    }))
+      .patch(`/api/issues/${existing.id}`)
+      .send({
+        comment: "Original work complete. No new action required. Closing issue.",
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
   });
 });

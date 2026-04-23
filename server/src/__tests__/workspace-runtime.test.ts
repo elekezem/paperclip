@@ -408,6 +408,45 @@ describe("realizeExecutionWorkspace", () => {
     ).rejects.toThrow(/not a reusable git worktree \(path is not registered in `git worktree list`\)\./);
   });
 
+  it("falls back to project_primary when git_worktree is requested for a non-git workspace", async () => {
+    const managedWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-managed-workspace-"));
+
+    const realized = await realizeExecutionWorkspace({
+      base: {
+        baseCwd: managedWorkspace,
+        source: "project_primary",
+        projectId: "project-1",
+        workspaceId: "workspace-1",
+        repoUrl: null,
+        repoRef: null,
+      },
+      config: {
+        workspaceStrategy: {
+          type: "git_worktree",
+          branchTemplate: "{{issue.identifier}}-{{slug}}",
+        },
+      },
+      issue: {
+        id: "issue-1",
+        identifier: "PAP-700",
+        title: "Managed checkout fallback",
+      },
+      agent: {
+        id: "agent-1",
+        name: "Codex Coder",
+        companyId: "company-1",
+      },
+    });
+
+    expect(realized.strategy).toBe("project_primary");
+    expect(realized.cwd).toBe(managedWorkspace);
+    expect(realized.worktreePath).toBeNull();
+    expect(realized.created).toBe(false);
+    expect(realized.warnings).toEqual([
+      `Git worktree requested for non-git workspace "${managedWorkspace}"; falling back to project_primary.`,
+    ]);
+  });
+
   it("reuses the current linked worktree instead of nesting another worktree inside it", async () => {
     const repoRoot = await createTempRepo();
     const branchName = "PAP-1355-worktree-reuse";

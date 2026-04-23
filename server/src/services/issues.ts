@@ -921,13 +921,43 @@ export function issueService(db: Db) {
     return TERMINAL_HEARTBEAT_RUN_STATUSES.has(run.status);
   }
 
+  async function canAdoptCheckoutRun(input: {
+    expectedCheckoutRunId: string;
+    actorRunId: string;
+  }) {
+    if (await isTerminalOrMissingHeartbeatRun(input.expectedCheckoutRunId)) {
+      return true;
+    }
+
+    const [expectedRun, actorRun] = await Promise.all([
+      db
+        .select({ status: heartbeatRuns.status })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, input.expectedCheckoutRunId))
+        .then((rows) => rows[0] ?? null),
+      db
+        .select({ status: heartbeatRuns.status })
+        .from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, input.actorRunId))
+        .then((rows) => rows[0] ?? null),
+    ]);
+
+    if (!expectedRun) return true;
+    if (input.expectedCheckoutRunId === input.actorRunId) return true;
+
+    return actorRun?.status === "running" && expectedRun.status !== "running";
+  }
+
   async function adoptStaleCheckoutRun(input: {
     issueId: string;
     actorAgentId: string;
     actorRunId: string;
     expectedCheckoutRunId: string;
   }) {
-    const stale = await isTerminalOrMissingHeartbeatRun(input.expectedCheckoutRunId);
+    const stale = await canAdoptCheckoutRun({
+      expectedCheckoutRunId: input.expectedCheckoutRunId,
+      actorRunId: input.actorRunId,
+    });
     if (!stale) return null;
 
     const now = new Date();

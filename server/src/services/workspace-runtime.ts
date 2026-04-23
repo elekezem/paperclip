@@ -119,6 +119,21 @@ type ProcessOutputCapture = {
   totalBytes: number;
 };
 
+function buildProjectPrimaryWorkspace(
+  base: ExecutionWorkspaceInput,
+  warnings: string[] = [],
+): RealizedExecutionWorkspace {
+  return {
+    ...base,
+    strategy: "project_primary",
+    cwd: base.baseCwd,
+    branchName: null,
+    worktreePath: null,
+    warnings,
+    created: false,
+  };
+}
+
 type ProcessOutputAccumulator = {
   append(chunk: string): void;
   finish(): ProcessOutputCapture;
@@ -987,15 +1002,13 @@ export async function realizeExecutionWorkspace(input: {
   const rawStrategy = parseObject(input.config.workspaceStrategy);
   const strategyType = asString(rawStrategy.type, "project_primary");
   if (strategyType !== "git_worktree") {
-    return {
-      ...input.base,
-      strategy: "project_primary",
-      cwd: input.base.baseCwd,
-      branchName: null,
-      worktreePath: null,
-      warnings: [],
-      created: false,
-    };
+    return buildProjectPrimaryWorkspace(input.base);
+  }
+
+  if (!await isGitCheckout(input.base.baseCwd)) {
+    return buildProjectPrimaryWorkspace(input.base, [
+      `Git worktree requested for non-git workspace "${input.base.baseCwd}"; falling back to project_primary.`,
+    ]);
   }
 
   const repoRoot = await resolveGitOwnerRepoRoot(input.base.baseCwd);

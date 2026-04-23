@@ -162,6 +162,28 @@ function shouldImplicitlyReopenCommentForAgent(input: {
   return true;
 }
 
+const AGENT_RUN_CLOSEOUT_COMMENT_MARKERS = [
+  "original work complete",
+  "no new action required",
+  "closing issue",
+];
+
+function shouldSuppressAgentCloseoutCommentWake(input: {
+  actorType: "agent" | "user";
+  actorId: string;
+  actorRunId: string | null;
+  assigneeAgentId: string | null | undefined;
+  body: string | null | undefined;
+}) {
+  if (input.actorType !== "agent") return false;
+  if (!input.actorRunId) return false;
+  if (typeof input.assigneeAgentId !== "string" || input.assigneeAgentId.length === 0) return false;
+  if (input.actorId === input.assigneeAgentId) return false;
+
+  const normalizedBody = input.body?.toLowerCase() ?? "";
+  return AGENT_RUN_CLOSEOUT_COMMENT_MARKERS.some((marker) => normalizedBody.includes(marker));
+}
+
 function diffExecutionParticipants(
   previousPolicy: NormalizedExecutionPolicy | null,
   nextPolicy: NormalizedExecutionPolicy | null,
@@ -1402,9 +1424,19 @@ export function issueRoutes(
     } = req.body;
     const requestedAssigneeAgentId =
       normalizedAssigneeAgentId === undefined ? existing.assigneeAgentId : normalizedAssigneeAgentId;
+    const suppressAgentCloseoutCommentWake =
+      !!commentBody &&
+      shouldSuppressAgentCloseoutCommentWake({
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        actorRunId: actor.runId,
+        assigneeAgentId: requestedAssigneeAgentId,
+        body: commentBody,
+      });
     const effectiveReopenRequested =
       reopenRequested ||
       (!!commentBody &&
+        !suppressAgentCloseoutCommentWake &&
         shouldImplicitlyReopenCommentForAgent({
           issueStatus: existing.status,
           assigneeAgentId: requestedAssigneeAgentId,
@@ -1843,7 +1875,7 @@ export function issueRoutes(
         const assigneeId = issue.assigneeAgentId;
         const actorIsAgent = actor.actorType === "agent";
         const selfComment = actorIsAgent && actor.actorId === assigneeId;
-        const skipAssigneeCommentWake = selfComment || isClosed;
+        const skipAssigneeCommentWake = selfComment || isClosed || suppressAgentCloseoutCommentWake;
 
         if (assigneeId && !assigneeChanged && (reopened || !skipAssigneeCommentWake)) {
           addWakeup(assigneeId, {
@@ -2331,14 +2363,22 @@ export function issueRoutes(
     const reopenRequested = req.body.reopen === true;
     const interruptRequested = req.body.interrupt === true;
     const isClosed = isClosedIssueStatus(issue.status);
+    const suppressAgentCloseoutCommentWake = shouldSuppressAgentCloseoutCommentWake({
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      actorRunId: actor.runId,
+      assigneeAgentId: issue.assigneeAgentId,
+      body: req.body.body,
+    });
     const effectiveReopenRequested =
       reopenRequested ||
+      (!suppressAgentCloseoutCommentWake &&
       shouldImplicitlyReopenCommentForAgent({
         issueStatus: issue.status,
         assigneeAgentId: issue.assigneeAgentId,
         actorType: actor.actorType,
         actorId: actor.actorId,
-      });
+      }));
     let reopened = false;
     let reopenFromStatus: string | null = null;
     let interruptedRunId: string | null = null;
@@ -2435,7 +2475,7 @@ export function issueRoutes(
       const assigneeId = currentIssue.assigneeAgentId;
       const actorIsAgent = actor.actorType === "agent";
       const selfComment = actorIsAgent && actor.actorId === assigneeId;
-      const skipWake = selfComment || isClosed;
+      const skipWake = selfComment || isClosed || suppressAgentCloseoutCommentWake;
       if (assigneeId && (reopened || !skipWake)) {
         if (reopened) {
           wakeups.set(assigneeId, {
