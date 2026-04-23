@@ -183,6 +183,14 @@ export function buildExecutionWorkspaceAdapterConfig(input: {
     input.issueSettings?.workspaceRuntime,
   );
   const hasWorkspaceControl = projectHasPolicy || issueHasWorkspaceOverrides || input.legacyUseProjectWorkspace === false;
+  const legacyStrategy = parseExecutionWorkspaceStrategy(nextConfig.workspaceStrategy);
+
+  // Legacy agent configs can carry git_worktree forward even when the run is
+  // using a shared managed checkout. If we leave that key in place, some
+  // adapters still try to treat the workspace as a git repo.
+  if (input.mode !== "isolated_workspace" && legacyStrategy?.type === "git_worktree") {
+    delete nextConfig.workspaceStrategy;
+  }
 
   if (hasWorkspaceControl) {
     if (input.mode === "isolated_workspace") {
