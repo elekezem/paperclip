@@ -185,6 +185,34 @@ describe("project workspace skill discovery", () => {
       ],
     });
   });
+
+  it("parses governed Open Design skill wrappers with canonical keys", async () => {
+    const skillDir = path.resolve(
+      process.cwd(),
+      "../../workspace/.cto/skills/open-design/web-prototype",
+    );
+
+    const imported = await readLocalSkillImportFromDirectory(
+      "33333333-3333-4333-8333-333333333333",
+      skillDir,
+      { inventoryMode: "full" },
+    );
+
+    expect(imported.key).toBe("open-design/web-prototype");
+    expect(imported.sourceType).toBe("local_path");
+    expect(imported.metadata).toMatchObject({
+      skillKey: "open-design/web-prototype",
+      sourceKind: "local_path",
+      sources: [
+        {
+          kind: "github-dir",
+          repo: "nexu-io/open-design",
+          path: "skills/web-prototype",
+          trackingRef: "open-design-v0.3.0",
+        },
+      ],
+    });
+  });
 });
 
 describe("missing local skill reconciliation", () => {

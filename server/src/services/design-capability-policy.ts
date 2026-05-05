@@ -17,16 +17,58 @@ const FALLBACK_POLICY: DesignCapabilityPolicy = {
   capability_packages: {
     design_builder: {
       profile: "builder",
-      skill_keys: ["zanwei/design-dna/design-dna"],
+      skill_keys: [
+        "zanwei/design-dna/design-dna",
+        "open-design/web-prototype",
+        "open-design/critique",
+      ],
     },
     design_verifier: {
       profile: "verifier",
-      skill_keys: ["zanwei/harness-design/harness-design"],
+      skill_keys: [
+        "zanwei/harness-design/harness-design",
+        "open-design/critique",
+      ],
+    },
+    open_design_prototype: {
+      profile: "builder",
+      skill_keys: [
+        "open-design/web-prototype",
+        "open-design/dashboard",
+        "open-design/mobile-app",
+        "open-design/wireframe-sketch",
+      ],
+    },
+    open_design_deck_report: {
+      profile: "builder",
+      skill_keys: [
+        "open-design/html-ppt",
+        "open-design/simple-deck",
+      ],
+    },
+    open_design_refinement: {
+      profile: "builder",
+      skill_keys: ["open-design/tweaks"],
+    },
+    open_design_motion: {
+      profile: "builder",
+      skill_keys: ["open-design/hyperframes"],
+    },
+    open_design_review: {
+      profile: "verifier",
+      skill_keys: ["open-design/critique"],
     },
   },
   future_defaults: {
-    builder: ["zanwei/design-dna/design-dna"],
-    verifier: ["zanwei/harness-design/harness-design"],
+    builder: [
+      "zanwei/design-dna/design-dna",
+      "open-design/web-prototype",
+      "open-design/critique",
+    ],
+    verifier: [
+      "zanwei/harness-design/harness-design",
+      "open-design/critique",
+    ],
     none: [],
   },
 };

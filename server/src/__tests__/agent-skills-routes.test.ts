@@ -404,6 +404,8 @@ describe("agent skill routes", () => {
             desiredSkills: expect.arrayContaining([
               "paperclipai/paperclip/paperclip",
               "zanwei/design-dna/design-dna",
+              "open-design/web-prototype",
+              "open-design/critique",
             ]),
           }),
         }),
@@ -435,6 +437,8 @@ describe("agent skill routes", () => {
               "paperclipai/paperclip/paperclip",
               "custom-visual-skill",
               "zanwei/design-dna/design-dna",
+              "open-design/web-prototype",
+              "open-design/critique",
             ]),
           }),
         }),
@@ -632,6 +636,7 @@ describe("agent skill routes", () => {
           desiredSkills: expect.arrayContaining([
             "paperclipai/paperclip/paperclip",
             "zanwei/harness-design/harness-design",
+            "open-design/critique",
           ]),
         }),
       }),
