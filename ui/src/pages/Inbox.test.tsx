@@ -15,6 +15,12 @@ vi.mock("@/lib/router", () => ({
   useNavigate: () => () => {},
 }));
 
+vi.mock("../context/LocaleContext", () => ({
+  useI18n: () => ({
+    formatStatus: (value: string) => value.replaceAll("_", " "),
+  }),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 

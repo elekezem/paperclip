@@ -261,6 +261,7 @@ describe("heartbeat comment wake batching", () => {
         adapterType: "openclaw_gateway",
         adapterConfig: {
           url: gateway.url,
+          attachPaperclipPayload: true,
           headers: {
             "x-openclaw-token": "gateway-token",
           },
@@ -454,6 +455,7 @@ describe("heartbeat comment wake batching", () => {
         adapterType: "openclaw_gateway",
         adapterConfig: {
           url: gateway.url,
+          attachPaperclipPayload: true,
           headers: {
             "x-openclaw-token": "gateway-token",
           },
@@ -642,6 +644,7 @@ describe("heartbeat comment wake batching", () => {
           adapterType: "openclaw_gateway",
           adapterConfig: {
             url: gateway.url,
+            attachPaperclipPayload: true,
             headers: {
               "x-openclaw-token": "gateway-token",
             },
@@ -662,6 +665,7 @@ describe("heartbeat comment wake batching", () => {
           adapterType: "openclaw_gateway",
           adapterConfig: {
             url: gateway.url,
+            attachPaperclipPayload: true,
             headers: {
               "x-openclaw-token": "gateway-token",
             },
@@ -847,6 +851,7 @@ describe("heartbeat comment wake batching", () => {
         adapterType: "openclaw_gateway",
         adapterConfig: {
           url: gateway.url,
+          attachPaperclipPayload: true,
           headers: {
             "x-openclaw-token": "gateway-token",
           },
@@ -1000,6 +1005,7 @@ describe("heartbeat comment wake batching", () => {
           adapterType: "openclaw_gateway",
           adapterConfig: {
             url: gateway.url,
+            attachPaperclipPayload: true,
             headers: {
               "x-openclaw-token": "gateway-token",
             },
@@ -1020,6 +1026,7 @@ describe("heartbeat comment wake batching", () => {
           adapterType: "openclaw_gateway",
           adapterConfig: {
             url: gateway.url,
+            attachPaperclipPayload: true,
             headers: {
               "x-openclaw-token": "gateway-token",
             },
@@ -1161,6 +1168,7 @@ describe("heartbeat comment wake batching", () => {
         adapterType: "openclaw_gateway",
         adapterConfig: {
           url: gateway.url,
+          attachPaperclipPayload: true,
           headers: {
             "x-openclaw-token": "gateway-token",
           },

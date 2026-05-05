@@ -3,6 +3,7 @@ import type {
   AdapterEnvironmentTestContext,
   AdapterEnvironmentTestResult,
 } from "@paperclipai/adapter-utils";
+import path from "node:path";
 import {
   asBoolean,
   asString,
@@ -30,6 +31,11 @@ function firstNonEmptyLine(text: string): string {
       .map((line) => line.trim())
       .find(Boolean) ?? ""
   );
+}
+
+function commandLooksLike(command: string, expected: string): boolean {
+  const base = path.basename(command).toLowerCase();
+  return base === expected || base === `${expected}.cmd` || base === `${expected}.exe`;
 }
 
 function summarizeProbeDetail(stdout: string, stderr: string, parsedError: string | null): string | null {
@@ -94,7 +100,6 @@ export async function testEnvironment(
 
   // Prevent OpenCode from writing an opencode.json into the working directory.
   env.OPENCODE_DISABLE_PROJECT_CONFIG = "true";
-  const preparedRuntimeConfig = await prepareOpenCodeRuntimeConfig({ env, config });
   if (asBoolean(config.dangerouslySkipPermissions, true)) {
     checks.push({
       code: "opencode_headless_permissions_enabled",
@@ -102,9 +107,18 @@ export async function testEnvironment(
       message: "Headless OpenCode external-directory permissions are auto-approved for unattended runs.",
     });
   }
+  let preparedRuntimeEnv: Record<string, string> | null = null;
+  const cleanupRuntimeConfigTasks: Array<() => Promise<void>> = [];
+  const baseRuntimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...env }));
+  const getRuntimeEnv = async () => {
+    if (!preparedRuntimeEnv) {
+      const preparedRuntimeConfig = await prepareOpenCodeRuntimeConfig({ env, config });
+      cleanupRuntimeConfigTasks.push(preparedRuntimeConfig.cleanup);
+      preparedRuntimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...preparedRuntimeConfig.env }));
+    }
+    return preparedRuntimeEnv;
+  };
   try {
-    const runtimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...preparedRuntimeConfig.env }));
-
     const cwdInvalid = checks.some((check) => check.code === "opencode_cwd_invalid");
     if (cwdInvalid) {
       checks.push({
@@ -115,7 +129,7 @@ export async function testEnvironment(
       });
     } else {
       try {
-        await ensureCommandResolvable(command, cwd, runtimeEnv);
+        await ensureCommandResolvable(command, cwd, baseRuntimeEnv);
         checks.push({
           code: "opencode_command_resolvable",
           level: "info",
@@ -133,11 +147,22 @@ export async function testEnvironment(
 
     const canRunProbe =
       checks.every((check) => check.code !== "opencode_cwd_invalid" && check.code !== "opencode_command_unresolvable");
+    const canRunOpenCodeCommand = canRunProbe && commandLooksLike(command, "opencode");
+    if (canRunProbe && !canRunOpenCodeCommand) {
+      checks.push({
+        code: "opencode_models_discovery_skipped_custom_command",
+        level: "info",
+        message: "Skipped OpenCode model discovery because command is not `opencode`.",
+        detail: command,
+        hint: "Use the `opencode` CLI command to run the automatic model and hello probes.",
+      });
+    }
 
     let modelValidationPassed = false;
     const configuredModel = asString(config.model, "").trim();
 
-    if (canRunProbe && configuredModel) {
+    if (canRunOpenCodeCommand && configuredModel) {
+      const runtimeEnv = await getRuntimeEnv();
       try {
         const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv });
         if (discovered.length > 0) {
@@ -173,7 +198,8 @@ export async function testEnvironment(
           });
         }
       }
-    } else if (canRunProbe && !configuredModel) {
+    } else if (canRunOpenCodeCommand && !configuredModel) {
+      const runtimeEnv = await getRuntimeEnv();
       try {
         const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv });
         if (discovered.length > 0) {
@@ -207,7 +233,8 @@ export async function testEnvironment(
     const modelUnavailable = checks.some((check) => check.code === "opencode_hello_probe_model_unavailable");
     if (!configuredModel && !modelUnavailable) {
       // No model configured – skip model requirement if no model-related checks exist
-    } else if (configuredModel && canRunProbe) {
+    } else if (configuredModel && canRunOpenCodeCommand) {
+      const runtimeEnv = await getRuntimeEnv();
       try {
         await ensureOpenCodeModelConfiguredAndAvailable({
           model: configuredModel,
@@ -231,7 +258,8 @@ export async function testEnvironment(
       }
     }
 
-    if (canRunProbe && modelValidationPassed) {
+    if (canRunOpenCodeCommand && modelValidationPassed) {
+      const runtimeEnv = await getRuntimeEnv();
       const extraArgs = (() => {
         const fromExtraArgs = asStringArray(config.extraArgs);
         if (fromExtraArgs.length > 0) return fromExtraArgs;
@@ -323,7 +351,9 @@ export async function testEnvironment(
       }
     }
   } finally {
-    await preparedRuntimeConfig.cleanup();
+    for (const cleanupRuntimeConfig of cleanupRuntimeConfigTasks) {
+      await cleanupRuntimeConfig();
+    }
   }
 
   return {

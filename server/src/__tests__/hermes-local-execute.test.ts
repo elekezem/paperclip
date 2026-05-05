@@ -2,7 +2,37 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { execute } from "hermes-paperclip-adapter/server";
+import { pathToFileURL } from "node:url";
+
+const FAKE_HERMES_SESSION_ID = "20260330_221824_311fec";
+
+type HermesExecute = (input: Record<string, unknown>) => Promise<{
+  exitCode: number | null;
+  resultJson?: Record<string, unknown> | null;
+}>;
+
+async function loadHermesExecute(): Promise<HermesExecute | null> {
+  const pluginStoreEntry = path.join(
+    os.homedir(),
+    ".paperclip",
+    "adapter-plugins",
+    "node_modules",
+    "@henkey",
+    "hermes-paperclip-adapter",
+    "dist",
+    "server",
+    "index.js",
+  );
+  try {
+    await fs.access(pluginStoreEntry);
+    const mod = await import(pathToFileURL(pluginStoreEntry).href) as { execute?: HermesExecute };
+    return typeof mod.execute === "function" ? mod.execute : null;
+  } catch {
+    return null;
+  }
+}
+
+const hermesExecute = await loadHermesExecute();
 
 async function writeFakeHermesCommand(commandPath: string): Promise<void> {
   const script = `#!/usr/bin/env node
@@ -15,7 +45,7 @@ const payload = {
 if (capturePath) {
   fs.writeFileSync(capturePath, JSON.stringify(payload), "utf8");
 }
-process.stdout.write("hello\\n\\nsession_id: hermes-session-1\\n");
+process.stdout.write("hello\\n\\nsession_id: ${FAKE_HERMES_SESSION_ID}\\n");
 `;
   await fs.writeFile(commandPath, script, "utf8");
   await fs.chmod(commandPath, 0o755);
@@ -36,7 +66,7 @@ async function runHermesExecute(args: {
     taskKey: string | null;
   };
 }) {
-  return execute({
+  return hermesExecute!({
     runId: "run-1",
     agent: {
       id: "agent-1",
@@ -60,8 +90,8 @@ async function runHermesExecute(args: {
   });
 }
 
-describe("hermes execute", () => {
-  it("omits the model flag when adapterConfig.model is unset", async () => {
+describe.runIf(hermesExecute)("hermes execute", () => {
+  it("passes the external adapter default model when adapterConfig.model is unset", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-hermes-default-model-"));
     const workspace = path.join(root, "workspace");
     const commandPath = path.join(root, "hermes");
@@ -85,14 +115,14 @@ describe("hermes execute", () => {
       expect(result.exitCode).toBe(0);
 
       const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
-      expect(capture.argv).not.toContain("-m");
-      expect(capture.argv).not.toContain("anthropic/claude-sonnet-4");
+      expect(capture.argv).toContain("-m");
+      expect(capture.argv).toContain("anthropic/claude-sonnet-4");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
   });
 
-  it("falls back to runtime.sessionId when sessionParams are missing", async () => {
+  it("resumes from structured runtime.sessionParams", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-hermes-runtime-session-"));
     const workspace = path.join(root, "workspace");
     const commandPath = path.join(root, "hermes");
@@ -106,15 +136,17 @@ describe("hermes execute", () => {
         workspace,
         capturePath,
         runtime: {
-          sessionId: "persisted-session-1",
-          sessionParams: null,
+          sessionId: null,
+          sessionParams: {
+            sessionId: "persisted-session-1",
+          },
           sessionDisplayId: "persisted-session-1",
           taskKey: null,
         },
       });
 
       expect(result.exitCode).toBe(0);
-      expect(result.resultJson?.session_id).toBe("hermes-session-1");
+      expect(result.resultJson?.session_id).toBe(FAKE_HERMES_SESSION_ID);
 
       const capture = JSON.parse(await fs.readFile(capturePath, "utf8")) as CapturePayload;
       expect(capture.argv).toContain("--resume");

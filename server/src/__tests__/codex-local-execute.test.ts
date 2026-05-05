@@ -233,7 +233,7 @@ describe("codex execute", () => {
           taskKey: null,
         },
         config: {
-          command: "codex",
+          command: commandPath,
           cwd: workspace,
           env: {
             PAPERCLIP_TEST_CAPTURE_PATH: capturePath,

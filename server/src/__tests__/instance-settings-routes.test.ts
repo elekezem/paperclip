@@ -178,6 +178,7 @@ describe("instance settings routes", () => {
       censorUsernameInLogs: false,
       keyboardShortcuts: false,
       feedbackDataSharingPreference: "prompt",
+      defaultUiLanguage: "system",
     });
   });
 

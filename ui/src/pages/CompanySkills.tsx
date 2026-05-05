@@ -43,7 +43,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
-  Github,
+  GitBranch as Github,
   Link2,
   ExternalLink,
   Paperclip,

@@ -26,7 +26,7 @@ import {
   Check,
   ChevronRight,
   Download,
-  Github,
+  GitBranch as Github,
   Package,
   Upload,
 } from "lucide-react";

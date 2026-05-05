@@ -3778,6 +3778,10 @@ export function heartbeatService(db: Db) {
       delete context.paperclipPreviousSessionId;
     }
 
+    if (!runtimeSessionParamsForAdapter && runtimeSessionIdForAdapter) {
+      runtimeSessionParamsForAdapter = { sessionId: runtimeSessionIdForAdapter };
+    }
+
     const runtimeForAdapter = {
       sessionId: runtimeSessionIdForAdapter,
       sessionParams: runtimeSessionParamsForAdapter,

@@ -112,6 +112,21 @@ async function waitForRunToSettle(
   return heartbeat.getRun(runId);
 }
 
+async function waitForRuntimeState(
+  heartbeat: ReturnType<typeof heartbeatService>,
+  agentId: string,
+  predicate: (state: Awaited<ReturnType<ReturnType<typeof heartbeatService>["getRuntimeState"]>>) => boolean,
+  timeoutMs = 3_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await heartbeat.getRuntimeState(agentId);
+    if (predicate(state)) return state;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return heartbeat.getRuntimeState(agentId);
+}
+
 async function spawnOrphanedProcessGroup() {
   const leader = spawn(
     process.execPath,
@@ -630,7 +645,11 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
     expect(route?.fallbackTriggered).toBe(true);
     expect(route?.fallbackErrorCode).toBe("gemini_quota_exhausted");
 
-    const runtimeState = await heartbeat.getRuntimeState(agentId);
+    const runtimeState = await waitForRuntimeState(
+      heartbeat,
+      agentId,
+      (state) => state?.adapterType === "codex_local",
+    );
     expect(runtimeState?.adapterType).toBe("codex_local");
     expect(runtimeState?.sessionId).toBe("codex-session-1");
 
@@ -746,11 +765,23 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       await waitForRunToSettle(heartbeat, retryRun.id);
     }
 
-    const issue = await db
+    let issue = await db
       .select()
       .from(issues)
       .where(eq(issues.id, issueId))
       .then((rows) => rows[0] ?? null);
+    const deadline = Date.now() + 3_000;
+    while (
+      Date.now() < deadline &&
+      (issue?.checkoutRunId !== (retryRun?.id ?? null) || issue?.executionRunId !== null)
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      issue = await db
+        .select()
+        .from(issues)
+        .where(eq(issues.id, issueId))
+        .then((rows) => rows[0] ?? null);
+    }
     expect(issue?.checkoutRunId).toBe(retryRun?.id ?? null);
     expect(issue?.executionRunId).toBeNull();
   });

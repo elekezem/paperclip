@@ -84,7 +84,7 @@ export async function promptServer(opts?: {
           : "dotta-macbook-pro, host.docker.internal",
       validate: (val) => {
         try {
-          parseHostnameCsv(val);
+          parseHostnameCsv(val ?? "");
           return;
         } catch (err) {
           return err instanceof Error ? err.message : "Invalid hostname list";
@@ -93,10 +93,11 @@ export async function promptServer(opts?: {
     });
 
     if (p.isCancel(allowedHostnamesInput)) cancelled();
+    const allowedHostnamesText = allowedHostnamesInput ?? "";
 
     const preset = buildPresetServerConfig(bind, {
       port,
-      allowedHostnames: parseHostnameCsv(allowedHostnamesInput),
+      allowedHostnames: parseHostnameCsv(allowedHostnamesText),
       serveUi,
     });
     if (bind === "tailnet" && isLoopbackHost(preset.server.host)) {
@@ -156,14 +157,16 @@ export async function promptServer(opts?: {
     defaultValue: defaultHost,
     placeholder: defaultHost,
     validate: (val) => {
-      if (!val.trim()) return "Host is required";
-      if (deploymentMode === "local_trusted" && !isLoopbackHost(val.trim())) {
+      const candidate = (val ?? "").trim();
+      if (!candidate) return "Host is required";
+      if (deploymentMode === "local_trusted" && !isLoopbackHost(candidate)) {
         return "Local trusted mode requires a loopback host such as 127.0.0.1";
       }
     },
   });
 
   if (p.isCancel(host)) cancelled();
+  const hostText = host ?? "";
 
   let allowedHostnames: string[] = [];
   if (deploymentMode === "authenticated" && exposure === "private") {
@@ -173,7 +176,7 @@ export async function promptServer(opts?: {
       placeholder: "dotta-macbook-pro, your-host.tailnet.ts.net",
       validate: (val) => {
         try {
-          parseHostnameCsv(val);
+          parseHostnameCsv(val ?? "");
           return;
         } catch (err) {
           return err instanceof Error ? err.message : "Invalid hostname list";
@@ -182,7 +185,7 @@ export async function promptServer(opts?: {
     });
 
     if (p.isCancel(allowedHostnamesInput)) cancelled();
-    allowedHostnames = parseHostnameCsv(allowedHostnamesInput);
+    allowedHostnames = parseHostnameCsv(allowedHostnamesInput ?? "");
   }
 
   let publicBaseUrl: string | undefined;
@@ -192,7 +195,7 @@ export async function promptServer(opts?: {
       defaultValue: currentAuth?.publicBaseUrl ?? "",
       placeholder: "https://paperclip.example.com",
       validate: (val) => {
-        const candidate = val.trim();
+        const candidate = (val ?? "").trim();
         if (!candidate) return "Public base URL is required for public exposure";
         try {
           const url = new URL(candidate);
@@ -206,13 +209,13 @@ export async function promptServer(opts?: {
       },
     });
     if (p.isCancel(urlInput)) cancelled();
-    publicBaseUrl = urlInput.trim().replace(/\/+$/, "");
+    publicBaseUrl = (urlInput ?? "").trim().replace(/\/+$/, "");
   }
 
   return buildCustomServerConfig({
     deploymentMode,
     exposure,
-    host: host.trim(),
+    host: hostText.trim(),
     port,
     allowedHostnames,
     serveUi,

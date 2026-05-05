@@ -81,6 +81,7 @@ describe("opencode_local environment diagnostics", () => {
         config: {
           command: fakeOpencode,
           cwd,
+          dangerouslySkipPermissions: false,
         },
       });
 
