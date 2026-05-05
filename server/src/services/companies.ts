@@ -124,17 +124,45 @@ export function companyService(db: Db) {
     return "A".repeat(attempt - 1);
   }
 
+  function readErrorString(error: object, field: "code" | "constraint" | "constraint_name") {
+    const value = field in error ? (error as Record<string, unknown>)[field] : undefined;
+    return typeof value === "string" ? value : undefined;
+  }
+
+  function readErrorMessage(error: unknown) {
+    if (error instanceof Error) return error.message;
+    if (typeof error === "object" && error !== null && "message" in error) {
+      const message = (error as { message?: unknown }).message;
+      return typeof message === "string" ? message : "";
+    }
+    return "";
+  }
+
+  function readErrorCause(error: object) {
+    return "cause" in error ? (error as { cause?: unknown }).cause : undefined;
+  }
+
   function isIssuePrefixConflict(error: unknown) {
-    const constraint = typeof error === "object" && error !== null && "constraint" in error
-      ? (error as { constraint?: string }).constraint
-      : typeof error === "object" && error !== null && "constraint_name" in error
-        ? (error as { constraint_name?: string }).constraint_name
-        : undefined;
-    return typeof error === "object"
-      && error !== null
-      && "code" in error
-      && (error as { code?: string }).code === "23505"
-      && constraint === "companies_issue_prefix_idx";
+    const visited = new Set<unknown>();
+    let current: unknown = error;
+
+    while (typeof current === "object" && current !== null && !visited.has(current)) {
+      visited.add(current);
+      const code = readErrorString(current, "code");
+      const constraint = readErrorString(current, "constraint") ?? readErrorString(current, "constraint_name");
+      const message = readErrorMessage(current);
+      const hasUniqueViolation = code === "23505" || message.includes("duplicate key value violates unique constraint");
+      const hasIssuePrefixConstraint = constraint === "companies_issue_prefix_idx"
+        || message.includes("companies_issue_prefix_idx");
+
+      if (hasUniqueViolation && hasIssuePrefixConstraint) {
+        return true;
+      }
+
+      current = readErrorCause(current);
+    }
+
+    return false;
   }
 
   async function createCompanyWithUniquePrefix(data: typeof companies.$inferInsert) {
