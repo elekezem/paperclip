@@ -16,9 +16,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "storybook": "storybook dev -p 6006 -c storybook/.storybook",
+    "build-storybook": "storybook build -c storybook/.storybook -o storybook-static",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "clean": "rm -rf dist storybook-static tsconfig.tsbuildinfo",
     "prepack": "rm -f package.dev.json && cp package.json package.dev.json && node ../scripts/generate-ui-package-json.mjs",
     "postpack": "if [ -f package.dev.json ]; then mv package.dev.json package.json; fi"
   },
@@ -34,6 +36,7 @@
     "@mdxeditor/editor": "^3.55.0",
     "@paperclipai/adapter-claude-local": "workspace:*",
     "@paperclipai/adapter-codex-local": "workspace:*",
+    "@paperclipai/adapter-cursor-cloud": "workspace:*",
     "@paperclipai/adapter-cursor-local": "workspace:*",
     "@paperclipai/adapter-gemini-local": "workspace:*",
     "@paperclipai/adapter-openclaw-gateway": "workspace:*",

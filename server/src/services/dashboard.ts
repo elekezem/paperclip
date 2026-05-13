@@ -122,7 +122,9 @@ export function dashboardService(db: Db) {
       }
 
       const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStart = getUtcMonthStart(now);
+      const runActivityDays = getRecentUtcDateKeys(now, DASHBOARD_RUN_ACTIVITY_DAYS);
+      const runActivityStart = new Date(`${runActivityDays[0]}T00:00:00.000Z`);
       const [{ monthSpend }] = await db
         .select({
           monthSpend: sql<number>`coalesce(sum(${costEvents.costCents}), 0)::double precision`,
@@ -136,6 +138,38 @@ export function dashboardService(db: Db) {
         );
 
       const monthSpendCents = Number(monthSpend);
+      const runActivityDayExpr = sql<string>`to_char(${heartbeatRuns.createdAt} at time zone 'UTC', 'YYYY-MM-DD')`;
+      const runActivityRows = await db
+        .select({
+          date: runActivityDayExpr,
+          status: heartbeatRuns.status,
+          count: sql<number>`count(*)::double precision`,
+        })
+        .from(heartbeatRuns)
+        .where(
+          and(
+            eq(heartbeatRuns.companyId, companyId),
+            gte(heartbeatRuns.createdAt, runActivityStart),
+          ),
+        )
+        .groupBy(runActivityDayExpr, heartbeatRuns.status);
+
+      const runActivity = new Map(
+        runActivityDays.map((date) => [
+          date,
+          { date, succeeded: 0, failed: 0, other: 0, total: 0 },
+        ]),
+      );
+      for (const row of runActivityRows) {
+        const bucket = runActivity.get(row.date);
+        if (!bucket) continue;
+        const count = Number(row.count);
+        if (row.status === "succeeded") bucket.succeeded += count;
+        else if (row.status === "failed" || row.status === "timed_out") bucket.failed += count;
+        else bucket.other += count;
+        bucket.total += count;
+      }
+
       const utilization =
         company.budgetMonthlyCents > 0
           ? (monthSpendCents / company.budgetMonthlyCents) * 100

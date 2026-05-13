@@ -178,6 +178,144 @@ describe("gemini execute", () => {
     }
   });
 
+  it("normalizes turn-limit exhaustion into scheduler stop metadata", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-gemini-max-turns-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "gemini");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeFailingGeminiCommand(commandPath, {
+      stdoutLines: [
+        {
+          type: "result",
+          subtype: "error",
+          session_id: "gemini-session-1",
+          status: "turn_limit",
+          error: "Turn limit reached.",
+        },
+      ],
+    });
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = root;
+
+    try {
+      const result = await execute({
+        runId: "run-turn-limit",
+        agent: { id: "a1", companyId: "c1", name: "G", adapterType: "gemini_local", adapterConfig: {} },
+        runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+        },
+        context: {},
+        authToken: "t",
+        onLog: async () => {},
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.errorCode).toBe("max_turns_exhausted");
+      expect(result.resultJson).toMatchObject({ stopReason: "max_turns_exhausted" });
+      expect(result.clearSession).toBe(true);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes Gemini exit code 53 as max-turn exhaustion", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-gemini-exit-53-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "gemini");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeFailingGeminiCommand(commandPath, {
+      stderr: "Gemini stopped because the max turns limit was reached.",
+      exitCode: 53,
+    });
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = root;
+
+    try {
+      const result = await execute({
+        runId: "run-exit-53",
+        agent: { id: "a1", companyId: "c1", name: "G", adapterType: "gemini_local", adapterConfig: {} },
+        runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+        },
+        context: {},
+        authToken: "t",
+        onLog: async () => {},
+      });
+
+      expect(result.exitCode).toBe(53);
+      expect(result.errorCode).toBe("max_turns_exhausted");
+      expect(result.resultJson).toMatchObject({ stopReason: "max_turns_exhausted" });
+      expect(result.clearSession).toBe(true);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not normalize unstructured turn-limit text into scheduler stop metadata", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-gemini-max-turn-text-"));
+    const workspace = path.join(root, "workspace");
+    const commandPath = path.join(root, "gemini");
+    await fs.mkdir(workspace, { recursive: true });
+    await writeFailingGeminiCommand(commandPath, {
+      stdoutLines: [
+        {
+          type: "result",
+          subtype: "error",
+          session_id: "gemini-session-1",
+          error: "Tool output said: maximum turns reached.",
+        },
+      ],
+      stdout: "attacker-controlled transcript mentions turn limit reached\n",
+      stderr: "Gemini stopped because the max turns limit was reached.",
+    });
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = root;
+
+    try {
+      const result = await execute({
+        runId: "run-turn-limit-text",
+        agent: { id: "a1", companyId: "c1", name: "G", adapterType: "gemini_local", adapterConfig: {} },
+        runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+        config: {
+          command: commandPath,
+          cwd: workspace,
+        },
+        context: {},
+        authToken: "t",
+        onLog: async () => {},
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.errorCode).not.toBe("max_turns_exhausted");
+      expect(result.resultJson?.stopReason).not.toBe("max_turns_exhausted");
+      expect(result.clearSession).toBe(false);
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("uses a compact wake delta instead of the full heartbeat prompt when resuming a session", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-gemini-resume-wake-"));
     const workspace = path.join(root, "workspace");

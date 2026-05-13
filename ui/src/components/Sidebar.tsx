@@ -10,11 +10,13 @@ import {
   Network,
   Boxes,
   Repeat,
+  GitBranch,
   Settings,
   Bot,
   ShieldCheck,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { NavLink } from "@/lib/router";
 import { SidebarSection } from "./SidebarSection";
 import { SidebarNavItem } from "./SidebarNavItem";
 import { SidebarProjects } from "./SidebarProjects";
@@ -30,12 +32,17 @@ import { queryKeys } from "../lib/queryKeys";
 import { useInboxBadge } from "../hooks/useInboxBadge";
 import { Button } from "@/components/ui/button";
 import { PluginSlotOutlet } from "@/plugins/slots";
+import { SidebarCompanyMenu } from "./SidebarCompanyMenu";
 
 export function Sidebar() {
   const { t } = useI18n();
   const { openNewIssue } = useDialog();
   const { selectedCompanyId, selectedCompany } = useCompany();
   const inboxBadge = useInboxBadge(selectedCompanyId);
+  const { data: experimentalSettings } = useQuery({
+    queryKey: queryKeys.instance.experimentalSettings,
+    queryFn: () => instanceSettingsApi.getExperimental(),
+  });
   const { data: liveRuns } = useQuery({
     queryKey: queryKeys.liveRuns(selectedCompanyId!),
     queryFn: () => heartbeatsApi.liveRunsForCompany(selectedCompanyId!),
@@ -77,12 +84,16 @@ export function Sidebar() {
           {selectedCompany?.name ?? t("common.selectCompany")}
         </span>
         <Button
+          asChild
           variant="ghost"
           size="icon-sm"
           className="text-muted-foreground shrink-0"
-          onClick={openSearch}
+          aria-label="Search"
+          title="Search"
         >
-          <Search className="h-4 w-4" />
+          <NavLink to="/search">
+            <Search className="h-4 w-4" />
+          </NavLink>
         </Button>
       </div>
 

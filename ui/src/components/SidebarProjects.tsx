@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { NavLink, useLocation } from "@/lib/router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Plus } from "lucide-react";
+import { FolderOpen, Plus } from "lucide-react";
 import {
   DndContext,
   MouseSensor,
@@ -13,7 +13,7 @@ import {
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCompany } from "../context/CompanyContext";
-import { useDialog } from "../context/DialogContext";
+import { useDialogActions } from "../context/DialogContext";
 import { useSidebar } from "../context/SidebarContext";
 import { authApi } from "../api/auth";
 import { projectsApi } from "../api/projects";
@@ -23,25 +23,27 @@ import { cn, projectRouteRef } from "../lib/utils";
 import { useProjectOrder } from "../hooks/useProjectOrder";
 import { useI18n } from "../context/LocaleContext";
 import { BudgetSidebarMarker } from "./BudgetSidebarMarker";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { SidebarSection, type SidebarSectionRadioChoice } from "./SidebarSection";
 import { PluginSlotMount, usePluginSlots } from "@/plugins/slots";
+import {
+  getProjectSortModeStorageKey,
+  PROJECT_SORT_MODE_UPDATED_EVENT,
+  readProjectSortMode,
+  type ProjectSortModeUpdatedDetail,
+  type ProjectSidebarSortMode,
+  writeProjectSortMode,
+} from "../lib/project-order";
 import type { Project } from "@paperclipai/shared";
 
 type ProjectSidebarSlot = ReturnType<typeof usePluginSlots>["slots"][number];
 
-function SortableProjectItem({
-  activeProjectRef,
-  companyId,
-  companyPrefix,
-  isMobile,
-  project,
-  projectSidebarSlots,
-  setSidebarOpen,
-}: {
+const PROJECT_SORT_CHOICES: SidebarSectionRadioChoice[] = [
+  { value: "top", label: "Top" },
+  { value: "alphabetical", label: "Alphabetical" },
+  { value: "recent", label: "Recent" },
+];
+
+type ProjectItemProps = {
   activeProjectRef: string | null;
   companyId: string | null;
   companyPrefix: string | null;
@@ -58,9 +60,7 @@ function SortableProjectItem({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: project.id });
-
-  const routeRef = projectRouteRef(project);
+  } = useSortable({ id: props.project.id });
 
   return (
     <div
@@ -148,6 +148,14 @@ export function SidebarProjects() {
   });
 
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
+  const sortModeStorageKey = useMemo(() => {
+    if (!selectedCompanyId) return null;
+    return getProjectSortModeStorageKey(selectedCompanyId, currentUserId);
+  }, [currentUserId, selectedCompanyId]);
+  const [sortMode, setSortMode] = useState<ProjectSidebarSortMode>(() => {
+    if (!sortModeStorageKey) return "top";
+    return readProjectSortMode(sortModeStorageKey);
+  });
 
   const visibleProjects = useMemo(
     () => (projects ?? []).filter((project: Project) => !project.archivedAt),
@@ -158,6 +166,11 @@ export function SidebarProjects() {
     companyId: selectedCompanyId,
     userId: currentUserId,
   });
+  const sortedProjects = useMemo(
+    () => sortProjects(orderedProjects, sortMode),
+    [orderedProjects, sortMode],
+  );
+  const isTopMode = sortMode === "top";
 
   const projectMatch = location.pathname.match(/^\/(?:[^/]+\/)?projects\/([^/]+)/);
   const activeProjectRef = projectMatch?.[1] ?? null;
@@ -168,8 +181,50 @@ export function SidebarProjects() {
     }),
   );
 
+  useEffect(() => {
+    if (!sortModeStorageKey) {
+      setSortMode("top");
+      return;
+    }
+    setSortMode(readProjectSortMode(sortModeStorageKey));
+  }, [sortModeStorageKey]);
+
+  useEffect(() => {
+    if (!sortModeStorageKey) return;
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== sortModeStorageKey) return;
+      setSortMode(readProjectSortMode(sortModeStorageKey));
+    };
+    const onCustomEvent = (event: Event) => {
+      const detail = (event as CustomEvent<ProjectSortModeUpdatedDetail>).detail;
+      if (!detail || detail.storageKey !== sortModeStorageKey) return;
+      setSortMode(detail.sortMode);
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener(PROJECT_SORT_MODE_UPDATED_EVENT, onCustomEvent);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(PROJECT_SORT_MODE_UPDATED_EVENT, onCustomEvent);
+    };
+  }, [sortModeStorageKey]);
+
+  const persistSortMode = useCallback(
+    (value: string) => {
+      const nextSortMode: ProjectSidebarSortMode =
+        value === "alphabetical" || value === "recent" ? value : "top";
+      setSortMode(nextSortMode);
+      if (sortModeStorageKey) {
+        writeProjectSortMode(sortModeStorageKey, nextSortMode);
+      }
+    },
+    [sortModeStorageKey],
+  );
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      if (!isTopMode) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
@@ -180,7 +235,20 @@ export function SidebarProjects() {
 
       persistOrder(arrayMove(ids, oldIndex, newIndex));
     },
-    [orderedProjects, persistOrder],
+    [isTopMode, orderedProjects, persistOrder],
+  );
+
+  const renderProject = (project: Project) => (
+    <ProjectItem
+      key={project.id}
+      activeProjectRef={activeProjectRef}
+      companyId={selectedCompanyId}
+      companyPrefix={selectedCompany?.issuePrefix ?? null}
+      isMobile={isMobile}
+      project={project}
+      projectSidebarSlots={projectSidebarSlots}
+      setSidebarOpen={setSidebarOpen}
+    />
   );
 
   return (
@@ -221,7 +289,7 @@ export function SidebarProjects() {
             items={orderedProjects.map((project) => project.id)}
             strategy={verticalListSortingStrategy}
           >
-            <div className="flex flex-col gap-0.5 mt-0.5">
+            <div className="flex flex-col gap-0.5">
               {orderedProjects.map((project: Project) => (
                 <SortableProjectItem
                   key={project.id}
@@ -237,7 +305,11 @@ export function SidebarProjects() {
             </div>
           </SortableContext>
         </DndContext>
-      </CollapsibleContent>
-    </Collapsible>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {sortedProjects.map((project: Project) => renderProject(project))}
+        </div>
+      )}
+    </SidebarSection>
   );
 }

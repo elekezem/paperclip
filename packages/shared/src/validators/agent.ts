@@ -68,7 +68,9 @@ export const createAgentSchema = z.object({
   desiredSkills: z.array(z.string().min(1)).optional(),
   adapterType: agentAdapterTypeSchema,
   adapterConfig: adapterConfigSchema.optional().default({}),
-  runtimeConfig: z.record(z.unknown()).optional().default({}),
+  instructionsBundle: createAgentInstructionsBundleSchema.optional(),
+  runtimeConfig: agentRuntimeConfigSchema.optional().default({}),
+  defaultEnvironmentId: z.string().uuid().optional().nullable(),
   budgetMonthlyCents: z.number().int().nonnegative().optional().default(0),
   permissions: agentPermissionsSchema.optional(),
   metadata: agentMetadataSchema.optional().nullable(),
@@ -137,6 +139,13 @@ export type ResetAgentSession = z.infer<typeof resetAgentSessionSchema>;
 
 export const testAdapterEnvironmentSchema = z.object({
   adapterConfig: adapterConfigSchema.optional().default({}),
+  /**
+   * Optional environment to run the adapter test inside. When omitted, the
+   * test runs against the local Paperclip host. When provided and the
+   * environment is non-local (SSH/sandbox), the test probes are executed
+   * inside that environment so the result reflects real agent execution.
+   */
+  environmentId: z.string().uuid().optional().nullable(),
 });
 
 export type TestAdapterEnvironment = z.infer<typeof testAdapterEnvironmentSchema>;

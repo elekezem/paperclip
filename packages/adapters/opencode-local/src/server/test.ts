@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -9,13 +12,21 @@ import {
   asString,
   asStringArray,
   parseObject,
-  ensureAbsoluteDirectory,
-  ensureCommandResolvable,
   ensurePathInEnv,
-  runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
+import {
+  ensureAdapterExecutionTargetCommandResolvable,
+  maybeRunSandboxInstallCommand,
+  ensureAdapterExecutionTargetDirectory,
+  runAdapterExecutionTargetProcess,
+  describeAdapterExecutionTarget,
+  resolveAdapterExecutionTargetCwd,
+  prepareAdapterExecutionTargetRuntime,
+  overrideAdapterExecutionTargetRemoteCwd,
+} from "@paperclipai/adapter-utils/execution-target";
 import { discoverOpenCodeModels, ensureOpenCodeModelConfiguredAndAvailable } from "./models.js";
 import { parseOpenCodeJsonl } from "./parse.js";
+import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { prepareOpenCodeRuntimeConfig } from "./runtime-config.js";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {
@@ -64,10 +75,28 @@ export async function testEnvironment(
   const checks: AdapterEnvironmentCheck[] = [];
   const config = parseObject(ctx.config);
   const command = asString(config.command, "opencode");
-  const cwd = asString(config.cwd, process.cwd());
+  const target = ctx.executionTarget ?? null;
+  const targetIsRemote = target?.kind === "remote";
+  const cwd = resolveAdapterExecutionTargetCwd(target, asString(config.cwd, ""), process.cwd());
+  const targetLabel = targetIsRemote
+    ? ctx.environmentName ?? describeAdapterExecutionTarget(target)
+    : null;
+  const runId = `opencode-envtest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  if (targetLabel) {
+    checks.push({
+      code: "opencode_environment_target",
+      level: "info",
+      message: `Probing inside environment: ${targetLabel}`,
+    });
+  }
 
   try {
-    await ensureAbsoluteDirectory(cwd, { createIfMissing: false });
+    await ensureAdapterExecutionTargetDirectory(runId, target, cwd, {
+      cwd,
+      env: {},
+      createIfMissing: false,
+    });
     checks.push({
       code: "opencode_cwd_valid",
       level: "info",
@@ -128,6 +157,15 @@ export async function testEnvironment(
         detail: command,
       });
     } else {
+      const installCheck = await maybeRunSandboxInstallCommand({
+        runId,
+        target,
+        adapterKey: "opencode",
+        installCommand: SANDBOX_INSTALL_COMMAND,
+        detectCommand: command,
+        env,
+      });
+      if (installCheck) checks.push(installCheck);
       try {
         await ensureCommandResolvable(command, cwd, baseRuntimeEnv);
         checks.push({
@@ -274,12 +312,13 @@ export async function testEnvironment(
       if (extraArgs.length > 0) args.push(...extraArgs);
 
       try {
-        const probe = await runChildProcess(
-          `opencode-envtest-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        const probe = await runAdapterExecutionTargetProcess(
+          runId,
+          runtimeTarget,
           command,
           args,
           {
-            cwd,
+            cwd: runtimeCwd,
             env: runtimeEnv,
             timeoutSec: 60,
             graceSec: 5,
