@@ -1,3 +1,8 @@
+import {
+  buildSandboxNpmInstallCommand,
+  type AdapterModelProfileDefinition,
+} from "@paperclipai/adapter-utils";
+
 export const type = "gemini_local";
 export const label = "Gemini CLI (local)";
 export const DEFAULT_GEMINI_LOCAL_MODEL = "gemini-3.1-pro-preview";
@@ -5,6 +10,18 @@ export const DEFAULT_GEMINI_LOCAL_MODEL = "gemini-3.1-pro-preview";
 export const models = [
   { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
   { id: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
+];
+
+export const modelProfiles: AdapterModelProfileDefinition[] = [
+  {
+    key: "cheap",
+    label: "Cheap",
+    description: "Use Gemini Flash Lite as the budget Gemini CLI lane while preserving the primary model.",
+    adapterConfig: {
+      model: "gemini-2.5-flash-lite",
+    },
+    source: "adapter_default",
+  },
 ];
 
 export const agentConfigurationDoc = `# gemini_local agent configuration

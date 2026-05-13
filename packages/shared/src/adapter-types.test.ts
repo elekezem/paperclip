@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptInviteSchema, createAgentSchema, updateAgentSchema } from "./index.js";
+import { AGENT_ROLE_LABELS, acceptInviteSchema, createAgentSchema, updateAgentSchema } from "./index.js";
 
 describe("dynamic adapter type validation schemas", () => {
   it("accepts external adapter types in create/update agent schemas", () => {
@@ -24,6 +24,20 @@ describe("dynamic adapter type validation schemas", () => {
         adapterType: "   ",
       }),
     ).toThrow();
+  });
+
+  it("accepts an explicit managed instructions bundle for new agents", () => {
+    expect(
+      createAgentSchema.parse({
+        name: "Bundle Agent",
+        adapterType: "codex_local",
+        instructionsBundle: {
+          files: {
+            "AGENTS.md": "Use AGENTS.md.",
+          },
+        },
+      }).instructionsBundle?.files["AGENTS.md"],
+    ).toBe("Use AGENTS.md.");
   });
 
   it("accepts external adapter types in invite acceptance schema", () => {

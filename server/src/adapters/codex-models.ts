@@ -18,6 +18,14 @@ export async function listCodexModels(): Promise<AdapterModel[]> {
   return dedupeModels(codexFallbackModels);
 }
 
+export async function listCodexModels(): Promise<AdapterModel[]> {
+  return loadCodexModels();
+}
+
+export async function refreshCodexModels(): Promise<AdapterModel[]> {
+  return loadCodexModels({ forceRefresh: true });
+}
+
 export function resetCodexModelsCacheForTests() {
   // no-op: model listing no longer performs network discovery or caching
 }

@@ -1,11 +1,33 @@
+import type { AdapterModelProfileDefinition } from "@paperclipai/adapter-utils";
+
 export const type = "opencode_local";
 export const label = "OpenCode (local)";
 
 export const DEFAULT_OPENCODE_LOCAL_MODEL = "qwen/qwen3.6-plus";
 
+export function isValidOpenCodeModelId(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  const slashIndex = trimmed.indexOf("/");
+  return Boolean(trimmed) && slashIndex > 0 && slashIndex !== trimmed.length - 1;
+}
+
 export const models: Array<{ id: string; label: string }> = [
   { id: DEFAULT_OPENCODE_LOCAL_MODEL, label: DEFAULT_OPENCODE_LOCAL_MODEL },
   { id: "kimi/kimi-for-coding", label: "kimi/kimi-for-coding" },
+];
+
+export const modelProfiles: AdapterModelProfileDefinition[] = [
+  {
+    key: "cheap",
+    label: "Cheap",
+    description: "Use OpenCode's known Codex mini model as the budget lane.",
+    adapterConfig: {
+      model: "openai/gpt-5.1-codex-mini",
+      variant: "low",
+    },
+    source: "adapter_default",
+  },
 ];
 
 export const agentConfigurationDoc = `# opencode_local agent configuration

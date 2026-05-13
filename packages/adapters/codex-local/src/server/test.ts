@@ -7,13 +7,22 @@ import type {
 import {
   asString,
   parseObject,
-  ensureAbsoluteDirectory,
-  ensureCommandResolvable,
   ensurePathInEnv,
-  runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
+import {
+  ensureAdapterExecutionTargetCommandResolvable,
+  ensureAdapterExecutionTargetDirectory,
+  maybeRunSandboxInstallCommand,
+  runAdapterExecutionTargetProcess,
+  describeAdapterExecutionTarget,
+  resolveAdapterExecutionTargetCwd,
+  prepareAdapterExecutionTargetRuntime,
+} from "@paperclipai/adapter-utils/execution-target";
+import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { parseCodexJsonl } from "./parse.js";
+import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { codexHomeDir, readCodexAuthInfo } from "./quota.js";
 import { buildCodexExecArgs } from "./codex-args.js";
 import { resolveCodexCommand } from "./command.js";
@@ -60,6 +69,99 @@ function summarizeProbeDetail(stdout: string, stderr: string, parsedError: strin
 const CODEX_AUTH_REQUIRED_RE =
   /(?:not\s+logged\s+in|login\s+required|authentication\s+required|unauthorized|invalid(?:\s+or\s+missing)?\s+api(?:[_\s-]?key)?|openai[_\s-]?api[_\s-]?key|api[_\s-]?key.*required|please\s+run\s+`?codex\s+login`?)/i;
 
+async function prepareCodexHelloProbe(input: {
+  runId: string;
+  companyId: string;
+  target: AdapterEnvironmentTestContext["executionTarget"] | null;
+  targetIsRemote: boolean;
+  cwd: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  probeApiKey: string | null;
+}): Promise<{
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cleanup: () => Promise<void>;
+}> {
+  let preparedRuntime: Awaited<ReturnType<typeof prepareAdapterExecutionTargetRuntime>> | null = null;
+  let preparedRuntimeWorkspaceLocalDir: string | null = null;
+
+  const cleanup = async () => {
+    await preparedRuntime?.restoreWorkspace().catch(() => {});
+    if (preparedRuntimeWorkspaceLocalDir) {
+      await fs.rm(preparedRuntimeWorkspaceLocalDir, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+
+  if (input.targetIsRemote && !input.probeApiKey) {
+    const managedHome = await prepareManagedCodexHome(process.env, async () => {}, input.companyId, {
+      apiKey: null,
+    });
+    preparedRuntimeWorkspaceLocalDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), `paperclip-codex-envtest-${input.runId}-`),
+    );
+    preparedRuntime = await prepareAdapterExecutionTargetRuntime({
+      runId: input.runId,
+      target: input.target,
+      adapterKey: "codex",
+      workspaceLocalDir: preparedRuntimeWorkspaceLocalDir,
+      // Pass `input.cwd` as the base (not a pre-built per-run subdir).
+      // `prepareRemoteManagedRuntime` itself appends
+      // `.paperclip-runtime/runs/<runId>/workspace` to whatever it gets, so
+      // pre-building a per-run path here would double-nest the run ID.
+      workspaceRemoteDir: input.cwd,
+      installCommand: SANDBOX_INSTALL_COMMAND,
+      detectCommand: input.command,
+      assets: [
+        {
+          key: "home",
+          localDir: managedHome,
+          followSymlinks: true,
+        },
+      ],
+    });
+
+    return {
+      command: input.command,
+      args: input.args,
+      env: preparedRuntime.assetDirs.home
+        ? { ...input.env, CODEX_HOME: preparedRuntime.assetDirs.home }
+        : { ...input.env },
+      cleanup,
+    };
+  }
+
+  if (input.probeApiKey) {
+    const probeHome = input.targetIsRemote
+      ? path.posix.join(input.cwd, ".paperclip-runtime", "codex", `probe-home-${input.runId}`)
+      : path.join(os.tmpdir(), `paperclip-codex-probe-${input.runId}`);
+    return {
+      command: "sh",
+      args: [
+        "-c",
+        'set -e; mkdir -p "$CODEX_HOME"; umask 077; printf "%s" "$_PAPERCLIP_CODEX_AUTH_JSON" > "$CODEX_HOME/auth.json"; unset _PAPERCLIP_CODEX_AUTH_JSON; trap \'rm -rf "$CODEX_HOME"\' EXIT INT TERM; "$0" "$@"',
+        input.command,
+        ...input.args,
+      ],
+      env: {
+        ...input.env,
+        CODEX_HOME: probeHome,
+        _PAPERCLIP_CODEX_AUTH_JSON: JSON.stringify({ OPENAI_API_KEY: input.probeApiKey }),
+      },
+      cleanup,
+    };
+  }
+
+  return {
+    command: input.command,
+    args: input.args,
+    env: { ...input.env },
+    cleanup,
+  };
+}
+
 export async function testEnvironment(
   ctx: AdapterEnvironmentTestContext,
 ): Promise<AdapterEnvironmentTestResult> {
@@ -72,7 +174,11 @@ export async function testEnvironment(
   const cwd = asString(config.cwd, process.cwd());
 
   try {
-    await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
+    await ensureAdapterExecutionTargetDirectory(runId, target, cwd, {
+      cwd,
+      env: {},
+      createIfMissing: true,
+    });
     checks.push({
       code: "codex_cwd_valid",
       level: "info",
@@ -94,7 +200,7 @@ export async function testEnvironment(
   }
   const runtimeEnv = ensurePathInEnv(stripOpenAiApiKey({ ...process.env, ...env }));
   try {
-    await ensureCommandResolvable(command, cwd, runtimeEnv);
+    await ensureAdapterExecutionTargetCommandResolvable(command, target, cwd, runtimeEnv);
     checks.push({
       code: "codex_command_resolvable",
       level: "info",
@@ -110,7 +216,7 @@ export async function testEnvironment(
   }
 
   const configOpenAiKey = env.OPENAI_API_KEY;
-  const hostOpenAiKey = process.env.OPENAI_API_KEY;
+  const hostOpenAiKey = targetIsRemote ? undefined : process.env.OPENAI_API_KEY;
   if (isNonEmpty(configOpenAiKey) || isNonEmpty(hostOpenAiKey)) {
     const source = isNonEmpty(configOpenAiKey) ? "adapter config env" : "server environment";
     checks.push({
@@ -151,19 +257,44 @@ export async function testEnvironment(
         hint: "Use the `codex` CLI command to run the automatic login and installation probe.",
       });
     } else {
-      const execArgs = buildCodexExecArgs({ ...config, fastMode: false });
+      const execArgs = buildCodexExecArgs(
+        { ...config, fastMode: false },
+        { skipGitRepoCheck: targetIsSandbox },
+      );
       const args = execArgs.args;
       if (execArgs.fastModeIgnoredReason) {
         checks.push({
           code: "codex_fast_mode_unsupported_model",
           level: "warn",
           message: execArgs.fastModeIgnoredReason,
-          hint: "Switch the agent model to GPT-5.4 to enable Codex Fast mode.",
+          hint: "Switch the agent model to GPT-5.4 or enter a manual model ID to enable Codex Fast mode.",
+        });
+      }
+      if (targetIsSandbox) {
+        checks.push({
+          code: "codex_git_repo_check_skipped",
+          level: "info",
+          message: "Added --skip-git-repo-check for sandbox hello probes.",
+          hint: "Codex requires an explicit trust bypass in headless remote sandbox workspaces.",
         });
       }
 
-      const probe = await runChildProcess(
-        `codex-envtest-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      // Codex CLI (>= 0.122) ignores the OPENAI_API_KEY env var and only reads
+      // credentials from $CODEX_HOME/auth.json. When we have a key available,
+      // wrap the probe with a shell that materializes a per-run auth.json so
+      // the CLI can authenticate. The key content is passed via env (not on
+      // the command line) to avoid leaking it into process listings.
+      const probeApiKey = isNonEmpty(configOpenAiKey)
+        ? configOpenAiKey
+        : isNonEmpty(hostOpenAiKey)
+          ? hostOpenAiKey
+          : null;
+      const preparedProbe = await prepareCodexHelloProbe({
+        runId,
+        companyId: ctx.companyId,
+        target,
+        targetIsRemote,
+        cwd,
         command,
         args,
         {
