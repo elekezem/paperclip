@@ -51,6 +51,7 @@ import {
   DARWIN_BUNDLED_CODEX_COMMAND,
   resolveCodexCommand,
 } from "./command.js";
+import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const CODEX_ROLLOUT_NOISE_RE =
@@ -345,15 +346,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const codexSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
   const desiredSkillNames = resolveCodexDesiredSkillNames(config, codexSkillEntries);
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
-  const configuredOpenAiApiKey =
-    typeof envConfig.OPENAI_API_KEY === "string" && envConfig.OPENAI_API_KEY.trim().length > 0
-      ? envConfig.OPENAI_API_KEY.trim()
-      : null;
   const preparedManagedCodexHome =
     configuredCodexHome
       ? null
       : await prepareManagedCodexHome(process.env, onLog, agent.companyId, {
-          apiKey: configuredOpenAiApiKey,
+          apiKey: null,
         });
   const defaultCodexHome = resolveManagedCodexHomeDir(process.env, agent.companyId);
   const effectiveCodexHome = configuredCodexHome ?? preparedManagedCodexHome ?? defaultCodexHome;
@@ -494,12 +491,27 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   for (const [k, v] of Object.entries(envConfig)) {
     if (typeof v === "string") env[k] = v;
   }
+  env.CODEX_HOME = remoteCodexHome ?? effectiveCodexHome;
   const strippedOpenAiApiKey =
     hasNonEmptyEnvValue(env, "OPENAI_API_KEY") ||
     (typeof process.env.OPENAI_API_KEY === "string" && process.env.OPENAI_API_KEY.trim().length > 0);
   delete env.OPENAI_API_KEY;
   if (!hasExplicitApiKey && authToken) {
     env.PAPERCLIP_API_KEY = authToken;
+  }
+  if (executionTargetIsRemote && adapterExecutionTargetUsesPaperclipBridge(runtimeExecutionTarget)) {
+    paperclipBridge = await startAdapterExecutionTargetPaperclipBridge({
+      runId,
+      target: runtimeExecutionTarget,
+      runtimeRootDir: preparedExecutionTargetRuntime?.runtimeRootDir,
+      adapterKey: "codex",
+      timeoutSec,
+      hostApiToken: env.PAPERCLIP_API_KEY,
+      onLog,
+    });
+    if (paperclipBridge) {
+      Object.assign(env, paperclipBridge.env);
+    }
   }
   const mergedEnv = Object.fromEntries(
     Object.entries({ ...process.env, ...env }).filter(
@@ -508,9 +520,24 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   );
   const effectiveEnv = stripOpenAiApiKey(mergedEnv);
   const billingType = resolveCodexBillingType();
-  const runtimeEnv = ensurePathInEnv(effectiveEnv);
-  await ensureCommandResolvable(command, cwd, runtimeEnv);
-  const resolvedCommand = await resolveCommandForLogs(command, cwd, runtimeEnv);
+  const runtimeEnv = Object.fromEntries(
+    Object.entries(ensurePathInEnv(effectiveEnv)).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+  await ensureAdapterExecutionTargetRuntimeCommandInstalled({
+    runId,
+    target: executionTarget,
+    installCommand: ctx.runtimeCommandSpec?.installCommand,
+    detectCommand: ctx.runtimeCommandSpec?.detectCommand,
+    cwd,
+    env: runtimeEnv,
+    timeoutSec,
+    graceSec,
+    onLog,
+  });
+  await ensureAdapterExecutionTargetCommandResolvable(command, executionTarget, cwd, runtimeEnv);
+  const resolvedCommand = await resolveAdapterExecutionTargetCommandForLogs(command, executionTarget, cwd, runtimeEnv);
   const loggedEnv = buildInvocationEnvForLogs(env, {
     runtimeEnv,
     includeRuntimeKeys: ["HOME"],
@@ -593,34 +620,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         })
       : "";
   const commandNotes = (() => {
-    if (!instructionsFilePath) {
-      return [
-        ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
-        repoAgentsNote,
-      ];
-    }
-    if (instructionsPrefix.length > 0) {
-      if (shouldUseResumeDeltaPrompt) {
-        return [
-          ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
-          `Loaded agent instructions from ${instructionsFilePath}`,
-          "Skipped stdin instruction reinjection because an existing Codex session is being resumed with a wake delta.",
-          repoAgentsNote,
-        ];
-        if (forceSaferInvocation) {
-          notes.push("Codex transient fallback requested safer invocation settings for this retry.");
-        }
-        if (forceFreshSession) {
-          notes.push("Codex transient fallback forced a fresh session with a continuation handoff.");
-        }
-        return notes;
-      }
-      return [
-        ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
-        `Loaded agent instructions from ${instructionsFilePath}`,
-        `Prepended instructions + path directive to stdin prompt (relative references from ${instructionsDir}).`,
-        repoAgentsNote,
-      ];
+    const appendFallbackNotes = (notes: string[]) => {
       if (forceSaferInvocation) {
         notes.push("Codex transient fallback requested safer invocation settings for this retry.");
       }
@@ -628,19 +628,35 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         notes.push("Codex transient fallback forced a fresh session with a continuation handoff.");
       }
       return notes;
+    };
+    const billingNotes = strippedOpenAiApiKey ? [openAiApiKeyNote] : [];
+    if (!instructionsFilePath) {
+      return appendFallbackNotes([
+        ...billingNotes,
+        repoAgentsNote,
+      ]);
     }
-    return [
-      ...(strippedOpenAiApiKey ? [openAiApiKeyNote] : []),
+    if (instructionsPrefix.length > 0) {
+      if (shouldUseResumeDeltaPrompt) {
+        return appendFallbackNotes([
+          ...billingNotes,
+          `Loaded agent instructions from ${instructionsFilePath}`,
+          "Skipped stdin instruction reinjection because an existing Codex session is being resumed with a wake delta.",
+          repoAgentsNote,
+        ]);
+      }
+      return appendFallbackNotes([
+        ...billingNotes,
+        `Loaded agent instructions from ${instructionsFilePath}`,
+        `Prepended instructions + path directive to stdin prompt (relative references from ${instructionsDir}).`,
+        repoAgentsNote,
+      ]);
+    }
+    return appendFallbackNotes([
+      ...billingNotes,
       `Configured instructionsFilePath ${instructionsFilePath}, but file could not be read; continuing without injected instructions.`,
       repoAgentsNote,
-    ];
-    if (forceSaferInvocation) {
-      notes.push("Codex transient fallback requested safer invocation settings for this retry.");
-    }
-    if (forceFreshSession) {
-      notes.push("Codex transient fallback forced a fresh session with a continuation handoff.");
-    }
-    return notes;
+    ]);
   })();
   if (executionTargetIsSandbox) {
     commandNotes.push(

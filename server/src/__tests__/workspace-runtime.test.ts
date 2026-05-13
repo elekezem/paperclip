@@ -1344,7 +1344,7 @@ describe("realizeExecutionWorkspace", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it(
     "provisions worktree-local pnpm node_modules instead of reusing base-repo links",

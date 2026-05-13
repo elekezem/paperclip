@@ -44,6 +44,23 @@ const adapterConfigSchema = z.record(z.unknown()).superRefine((value, ctx) => {
   }
 });
 
+export const createAgentInstructionsBundleSchema = z.object({
+  files: z.record(z.string()),
+  entryFile: z.string().trim().min(1).optional(),
+});
+
+const agentModelProfileConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  label: z.string().trim().min(1).optional(),
+  adapterConfig: adapterConfigSchema.optional().default({}),
+}).passthrough();
+
+export const agentRuntimeConfigSchema = z.object({
+  modelProfiles: z.object({
+    cheap: agentModelProfileConfigSchema.optional(),
+  }).strict().optional(),
+}).passthrough();
+
 const designCapabilityProfileSchema = z.enum(["builder", "verifier", "none"]);
 
 const agentMetadataSchema = z.record(z.unknown()).superRefine((value, ctx) => {

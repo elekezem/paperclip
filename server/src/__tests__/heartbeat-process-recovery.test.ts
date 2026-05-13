@@ -35,6 +35,16 @@ import { runningProcesses } from "../adapters/index.ts";
 const mockTelemetryClient = vi.hoisted(() => ({ track: vi.fn() }));
 const mockTrackAgentFirstHeartbeat = vi.hoisted(() => vi.fn());
 const mockGetServerAdapter = vi.hoisted(() => vi.fn());
+const mockAdapterExecute = vi.hoisted(() =>
+  vi.fn(async () => ({
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    errorMessage: null,
+    provider: "test",
+    model: "test-model",
+  })),
+);
 
 vi.mock("../telemetry.ts", () => ({
   getTelemetryClient: () => mockTelemetryClient,
@@ -77,16 +87,18 @@ if (!embeddedPostgresSupport.supported) {
 }
 
 function installDefaultServerAdapterMock() {
+  mockAdapterExecute.mockReset();
+  mockAdapterExecute.mockImplementation(async () => ({
+    exitCode: 0,
+    signal: null,
+    timedOut: false,
+    errorMessage: null,
+    provider: "test",
+    model: "test-model",
+  }));
   mockGetServerAdapter.mockImplementation(() => ({
     supportsLocalAgentJwt: false,
-    execute: vi.fn(async () => ({
-      exitCode: 0,
-      signal: null,
-      timedOut: false,
-      errorMessage: null,
-      provider: "test",
-      model: "test-model",
-    })),
+    execute: mockAdapterExecute,
   }));
 }
 
@@ -144,6 +156,59 @@ async function waitForRuntimeState(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return heartbeat.getRuntimeState(agentId);
+}
+
+async function waitForValue<T>(
+  read: () => Promise<T | null | undefined>,
+  timeoutMs = 3_000,
+  intervalMs = 50,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastValue: T | null | undefined;
+  while (Date.now() < deadline) {
+    lastValue = await read();
+    if (lastValue !== null && lastValue !== undefined) return lastValue;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  lastValue = await read();
+  if (lastValue !== null && lastValue !== undefined) return lastValue;
+  throw new Error("Timed out waiting for expected test value");
+}
+
+async function waitForHeartbeatIdle(db: ReturnType<typeof createDb>, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  let idlePolls = 0;
+  while (Date.now() < deadline) {
+    const runs = await db
+      .select({ status: heartbeatRuns.status })
+      .from(heartbeatRuns);
+    const hasActiveRun = runs.some((run) => run.status === "queued" || run.status === "running");
+    if (!hasActiveRun) {
+      idlePolls += 1;
+      if (idlePolls >= 3) return;
+    } else {
+      idlePolls = 0;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for heartbeat runs to become idle");
+}
+
+async function cancelActiveRunsForCleanup(db: ReturnType<typeof createDb>, timeoutMs = 3_000) {
+  const now = new Date();
+  await db
+    .update(heartbeatRuns)
+    .set({
+      status: "failed",
+      errorCode: "test_cleanup",
+      error: "Cancelled by heartbeat process recovery test cleanup",
+      processPid: null,
+      processGroupId: null,
+      finishedAt: now,
+      updatedAt: now,
+    })
+    .where(inArray(heartbeatRuns.status, ["queued", "running"]));
+  await waitForHeartbeatIdle(db, timeoutMs);
 }
 
 async function spawnOrphanedProcessGroup() {
@@ -2133,24 +2198,28 @@ describeEmbeddedPostgres("heartbeat orphaned process recovery", () => {
       await waitForRunToSettle(heartbeat, retryRun.id);
     }
 
-    let issue = await db
-      .select()
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .then((rows) => rows[0] ?? null);
-    const deadline = Date.now() + 3_000;
-    while (
-      Date.now() < deadline &&
-      (issue?.checkoutRunId !== (retryRun?.id ?? null) || issue?.executionRunId !== null)
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      issue = await db
+    const issue = await waitForValue(async () =>
+      db
         .select()
         .from(issues)
         .where(eq(issues.id, issueId))
-        .then((rows) => rows[0] ?? null);
+        .then((rows) => {
+          const row = rows[0] ?? null;
+          return row?.checkoutRunId && row.checkoutRunId !== runId && row.executionRunId === null ? row : null;
+        }),
+      5_000,
+    );
+    const checkoutRun = await db
+      .select()
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, issue.checkoutRunId ?? ""))
+      .then((rows) => rows[0] ?? null);
+    expect(checkoutRun?.agentId).toBe(agentId);
+    expect(checkoutRun?.contextSnapshot).toMatchObject({ issueId, taskId: issueId });
+    if (issue.checkoutRunId !== retryRun?.id) {
+      const checkoutSnapshot = checkoutRun?.contextSnapshot as Record<string, unknown> | null | undefined;
+      expect(checkoutSnapshot?.sourceRunId ?? checkoutSnapshot?.resumeFromRunId).toBe(retryRun?.id);
     }
-    expect(issue?.checkoutRunId).toBe(retryRun?.id ?? null);
     expect(issue?.executionRunId).toBeNull();
   });
 

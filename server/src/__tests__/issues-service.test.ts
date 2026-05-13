@@ -9,6 +9,7 @@ import {
   createDb,
   environments,
   executionWorkspaces,
+  goals,
   heartbeatRuns,
   instanceSettings,
   issueComments,

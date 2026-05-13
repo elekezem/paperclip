@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Sidebar";
+import { LocaleProvider } from "../context/LocaleContext";
 
 const mockHeartbeatsApi = vi.hoisted(() => ({
   liveRunsForCompany: vi.fn(),
@@ -104,7 +105,9 @@ describe("Sidebar", () => {
     await act(async () => {
       root.render(
         <QueryClientProvider client={queryClient}>
-          <Sidebar />
+          <LocaleProvider>
+            <Sidebar />
+          </LocaleProvider>
         </QueryClientProvider>,
       );
     });

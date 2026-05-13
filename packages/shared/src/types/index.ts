@@ -308,6 +308,7 @@ export type {
   TradingStrategyRevision,
   TradingRoutineHealth,
   TradingMissionSummary,
+  DashboardRunActivityDay,
   DashboardSummary,
 } from "./dashboard.js";
 export type { ActivityEvent } from "./activity.js";

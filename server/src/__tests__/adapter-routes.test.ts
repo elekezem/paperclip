@@ -43,6 +43,23 @@ const overridingConfigSchemaAdapter: ServerAdapterModule = {
   }),
 };
 
+const hermesCapabilitiesAdapter: ServerAdapterModule = {
+  type: "hermes_local",
+  execute: async () => ({ exitCode: 0, signal: null, timedOut: false }),
+  testEnvironment: async () => ({
+    adapterType: "hermes_local",
+    status: "pass",
+    checks: [],
+    testedAt: new Date(0).toISOString(),
+  }),
+  listSkills: async () => ({ entries: [] }),
+  syncSkills: async () => ({ entries: [] }),
+  supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: false,
+  requiresMaterializedRuntimeSkills: false,
+  models: [],
+};
+
 let registerServerAdapter: typeof import("../adapters/registry.js").registerServerAdapter;
 let unregisterServerAdapter: typeof import("../adapters/registry.js").unregisterServerAdapter;
 let findServerAdapter: typeof import("../adapters/registry.js").findServerAdapter;
@@ -115,11 +132,14 @@ describe("adapter routes", () => {
     setOverridePaused("claude_local", false);
     unregisterServerAdapter("claude_local");
     registerServerAdapter(overridingConfigSchemaAdapter);
+    unregisterServerAdapter("hermes_local");
+    registerServerAdapter(hermesCapabilitiesAdapter);
   });
 
   afterEach(() => {
     setOverridePaused("claude_local", false);
     unregisterServerAdapter("claude_local");
+    unregisterServerAdapter("hermes_local");
   });
 
   it("GET /api/adapters includes capabilities object for each adapter", async () => {

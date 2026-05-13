@@ -60,30 +60,6 @@ const DESIGN_CAPABILITY_OPTIONS: Array<{
   },
 ];
 
-type DesignCapabilityProfile = "builder" | "verifier" | "none";
-
-const DESIGN_CAPABILITY_OPTIONS: Array<{
-  value: DesignCapabilityProfile;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "none",
-    label: "None",
-    description: "Do not auto-attach Zanwei design skills.",
-  },
-  {
-    value: "builder",
-    label: "Builder",
-    description: "Auto-attaches design-dna for design extraction and generation work.",
-  },
-  {
-    value: "verifier",
-    label: "Verifier",
-    description: "Auto-attaches harness-design for browser-level visual QA and correction.",
-  },
-];
-
 function createValuesForAdapterType(
   adapterType: CreateConfigValues["adapterType"],
 ): CreateConfigValues {
@@ -197,8 +173,8 @@ export function NewAgent() {
         return;
       }
     }
-    createAgent.mutate(
-      buildNewAgentHirePayload({
+    createAgent.mutate({
+      ...buildNewAgentHirePayload({
         name,
         effectiveRole,
         title,
@@ -207,7 +183,6 @@ export function NewAgent() {
         configValues,
         adapterConfig: buildAdapterConfig(),
       }),
-      budgetMonthlyCents: 0,
       metadata: {
         designCapabilityProfile,
       },

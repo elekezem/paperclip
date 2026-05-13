@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Layout } from "./Layout";
+import { LocaleProvider } from "../context/LocaleContext";
 
 const mockHealthApi = vi.hoisted(() => ({
   get: vi.fn(),
@@ -208,6 +210,14 @@ async function flushReact() {
   });
 }
 
+function withProviders(queryClient: QueryClient, children: ReactNode) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <LocaleProvider>{children}</LocaleProvider>
+    </QueryClientProvider>
+  );
+}
+
 describe("Layout", () => {
   let container: HTMLDivElement;
 
@@ -244,11 +254,7 @@ describe("Layout", () => {
     });
 
     await act(async () => {
-      root.render(
-        <QueryClientProvider client={queryClient}>
-          <Layout />
-        </QueryClientProvider>,
-      );
+      root.render(withProviders(queryClient, <Layout />));
     });
     await flushReact();
     await flushReact();
@@ -299,11 +305,7 @@ describe("Layout", () => {
     });
 
     await act(async () => {
-      root.render(
-        <QueryClientProvider client={queryClient}>
-          <Layout />
-        </QueryClientProvider>,
-      );
+      root.render(withProviders(queryClient, <Layout />));
     });
     await flushReact();
     await flushReact();
@@ -327,11 +329,7 @@ describe("Layout", () => {
     });
 
     await act(async () => {
-      root.render(
-        <QueryClientProvider client={queryClient}>
-          <Layout />
-        </QueryClientProvider>,
-      );
+      root.render(withProviders(queryClient, <Layout />));
     });
     await flushReact();
     await flushReact();
@@ -379,11 +377,7 @@ describe("Layout", () => {
     });
 
     await act(async () => {
-      root.render(
-        <QueryClientProvider client={queryClient}>
-          <Layout />
-        </QueryClientProvider>,
-      );
+      root.render(withProviders(queryClient, <Layout />));
     });
     await flushReact();
     await flushReact();
@@ -437,11 +431,7 @@ describe("Layout", () => {
     });
 
     await act(async () => {
-      root.render(
-        <QueryClientProvider client={queryClient}>
-          <Layout />
-        </QueryClientProvider>,
-      );
+      root.render(withProviders(queryClient, <Layout />));
     });
     await flushReact();
     await flushReact();
@@ -509,11 +499,7 @@ describe("Layout", () => {
     });
 
     await act(async () => {
-      root.render(
-        <QueryClientProvider client={queryClient}>
-          <Layout />
-        </QueryClientProvider>,
-      );
+      root.render(withProviders(queryClient, <Layout />));
     });
     await flushReact();
     await flushReact();

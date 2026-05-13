@@ -1,9 +1,27 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { agents, approvals, companies, costEvents, issues } from "@paperclipai/db";
+import { agents, approvals, companies, costEvents, heartbeatRuns, issues } from "@paperclipai/db";
 import type { DashboardSummary, TradingMissionSummary } from "@paperclipai/shared";
 import { notFound } from "../errors.js";
 import { budgetService } from "./budgets.js";
+
+const DASHBOARD_RUN_ACTIVITY_DAYS = 14;
+
+function formatUtcDateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+export function getUtcMonthStart(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function getRecentUtcDateKeys(now: Date, days: number): string[] {
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Array.from({ length: days }, (_, index) => {
+    const dayOffset = index - (days - 1);
+    return formatUtcDateKey(new Date(todayUtc + dayOffset * 24 * 60 * 60 * 1000));
+  });
+}
 
 const tradingKernelBaseUrl =
   process.env.PAPERCLIP_TRADING_KERNEL_URL
@@ -197,6 +215,7 @@ export function dashboardService(db: Db) {
           pausedAgents: budgetOverview.pausedAgentCount,
           pausedProjects: budgetOverview.pausedProjectCount,
         },
+        runActivity: Array.from(runActivity.values()),
         tradingMission,
       } satisfies DashboardSummary;
     },

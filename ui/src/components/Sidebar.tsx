@@ -22,12 +22,13 @@ import { SidebarNavItem } from "./SidebarNavItem";
 import { SidebarProjects } from "./SidebarProjects";
 import { SidebarAgents } from "./SidebarAgents";
 import { CompanyLaneChips } from "./CompanyLaneChips";
-import { useDialog } from "../context/DialogContext";
+import { useDialogActions } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
 import { useI18n } from "../context/LocaleContext";
 import { dashboardApi } from "../api/dashboard";
 import { heartbeatsApi } from "../api/heartbeats";
 import { issuesApi } from "../api/issues";
+import { instanceSettingsApi } from "../api/instanceSettings";
 import { queryKeys } from "../lib/queryKeys";
 import { useInboxBadge } from "../hooks/useInboxBadge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +37,7 @@ import { SidebarCompanyMenu } from "./SidebarCompanyMenu";
 
 export function Sidebar() {
   const { t } = useI18n();
-  const { openNewIssue } = useDialog();
+  const { openNewIssue } = useDialogActions();
   const { selectedCompanyId, selectedCompany } = useCompany();
   const inboxBadge = useInboxBadge(selectedCompanyId);
   const { data: experimentalSettings } = useQuery({
@@ -60,6 +61,7 @@ export function Sidebar() {
     enabled: !!selectedCompanyId,
   });
   const liveRunCount = liveRuns?.length ?? 0;
+  const showWorkspacesLink = experimentalSettings?.enableIsolatedWorkspaces === true;
   const companyDescription = selectedCompany?.description ?? t("common.aiNativeExecutionCompany");
 
   function openSearch() {
@@ -192,6 +194,9 @@ export function Sidebar() {
         <SidebarSection label={t("sidebar.section.planning")}>
           <SidebarNavItem to="/routines" label={t("sidebar.nav.routines")} icon={Repeat} textBadge="Beta" textBadgeTone="amber" />
           <SidebarNavItem to="/goals" label={t("sidebar.nav.goals")} icon={Target} />
+          {showWorkspacesLink ? (
+            <SidebarNavItem to="/workspaces" label={t("sidebar.nav.workspaces")} icon={GitBranch} />
+          ) : null}
         </SidebarSection>
 
         <SidebarProjects />

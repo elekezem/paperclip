@@ -1,4 +1,5 @@
 import type {
+  AdapterExecutionContext,
   AdapterModel,
   AdapterModelProfileDefinition,
   AdapterRuntimeCommandSpec,
@@ -187,6 +188,69 @@ function normalizeHermesConfig<T extends { config?: unknown; agent?: unknown }>(
   }
 
   return ctx;
+}
+
+function appendHermesPaperclipAuthGuidance(promptTemplate: string): string {
+  const guidance = [
+    "Paperclip API access note:",
+    "- Use Authorization: Bearer $PAPERCLIP_API_KEY for Paperclip API requests.",
+    "- Include X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID when calling back into Paperclip.",
+    "",
+    promptTemplate,
+  ].join("\n");
+  return guidance;
+}
+
+function cloneHermesExecutionContext(ctx: AdapterExecutionContext): AdapterExecutionContext {
+  const agentAdapterConfig =
+    ctx.agent.adapterConfig && typeof ctx.agent.adapterConfig === "object"
+      ? (ctx.agent.adapterConfig as Record<string, unknown>)
+      : {};
+  return {
+    ...ctx,
+    config: { ...ctx.config },
+    agent: {
+      ...ctx.agent,
+      adapterConfig: { ...agentAdapterConfig },
+    },
+  };
+}
+
+function wrapHermesExternalAdapter(adapter: ServerAdapterModule): ServerAdapterModule {
+  return {
+    ...adapter,
+    execute: async (ctx) => {
+      if (!ctx.authToken) {
+        return adapter.execute(ctx);
+      }
+
+      const patched = normalizeHermesConfig(cloneHermesExecutionContext(ctx));
+      const agentAdapterConfig =
+        patched.agent.adapterConfig && typeof patched.agent.adapterConfig === "object"
+          ? (patched.agent.adapterConfig as Record<string, unknown>)
+          : {};
+      const existingEnv =
+        agentAdapterConfig.env && typeof agentAdapterConfig.env === "object"
+          ? (agentAdapterConfig.env as Record<string, unknown>)
+          : {};
+      const env = {
+        ...existingEnv,
+        PAPERCLIP_API_KEY:
+          typeof existingEnv.PAPERCLIP_API_KEY === "string" && existingEnv.PAPERCLIP_API_KEY.trim().length > 0
+            ? existingEnv.PAPERCLIP_API_KEY
+            : ctx.authToken,
+        PAPERCLIP_RUN_ID: ctx.runId,
+      };
+
+      agentAdapterConfig.env = env;
+      if (typeof agentAdapterConfig.promptTemplate === "string") {
+        agentAdapterConfig.promptTemplate = appendHermesPaperclipAuthGuidance(agentAdapterConfig.promptTemplate);
+      }
+      patched.agent.adapterConfig = agentAdapterConfig;
+
+      return adapter.execute(patched);
+    },
+  };
 }
 
 function dedupeAdapterModels(models: AdapterModel[]): AdapterModel[] {
@@ -452,13 +516,16 @@ function getDisabledAdapterTypesFromStore(): string[] {
 export function resolveExternalAdapterRegistration(
   externalAdapter: ServerAdapterModule,
 ): ServerAdapterModule {
-  return {
+  const registered = {
     ...externalAdapter,
     sessionManagement:
       externalAdapter.sessionManagement
         ?? getAdapterSessionManagement(externalAdapter.type)
         ?? undefined,
   };
+  return registered.type === "hermes_local"
+    ? wrapHermesExternalAdapter(registered)
+    : registered;
 }
 
 /**

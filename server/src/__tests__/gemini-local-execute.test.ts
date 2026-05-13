@@ -48,6 +48,32 @@ process.exit(1);
   await fs.chmod(commandPath, 0o755);
 }
 
+async function writeFailingGeminiCommand(
+  commandPath: string,
+  options: {
+    stdoutLines?: Record<string, unknown>[];
+    stdout?: string;
+    stderr?: string;
+    exitCode?: number;
+  },
+): Promise<void> {
+  const stdoutLines = (options.stdoutLines ?? []).map((line) => JSON.stringify(line));
+  const script = `#!/usr/bin/env node
+if (${JSON.stringify(options.stdout ?? "")}) {
+  process.stdout.write(${JSON.stringify(options.stdout ?? "")});
+}
+for (const line of ${JSON.stringify(stdoutLines)}) {
+  console.log(line);
+}
+if (${JSON.stringify(options.stderr ?? "")}) {
+  process.stderr.write(${JSON.stringify(options.stderr ?? "")});
+}
+process.exit(${options.exitCode ?? 1});
+`;
+  await fs.writeFile(commandPath, script, "utf8");
+  await fs.chmod(commandPath, 0o755);
+}
+
 type CapturePayload = {
   argv: string[];
   paperclipEnvKeys: string[];

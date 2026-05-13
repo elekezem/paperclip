@@ -97,7 +97,9 @@ import {
   redactIssueMonitorExternalRef,
   setIssueExecutionPolicyMonitorScheduledBy,
 } from "../services/issue-execution-policy.js";
+import { parseIssueExecutionWorkspaceSettings } from "../services/execution-workspace-policy.js";
 import { shouldSuppressAgentCloseoutCommentWake } from "../services/issue-comment-wake-guards.js";
+import type { PluginWorkerManager } from "../services/plugin-worker-manager.js";
 
 const MAX_ISSUE_COMMENT_LIMIT = 500;
 const updateIssueRouteSchema = updateIssueSchema.extend({
@@ -2576,11 +2578,12 @@ export function issueRoutes(
         assigneeAgentId: requestedAssigneeAgentId,
         body: commentBody,
       });
-    const effectiveReopenRequested =
-      reopenRequested ||
+    const explicitMoveToTodoRequested = reopenRequested || resumeRequested === true;
+    const effectiveMoveToTodoRequested =
+      explicitMoveToTodoRequested ||
       (!!commentBody &&
         !suppressAgentCloseoutCommentWake &&
-        shouldImplicitlyReopenCommentForAgent({
+        shouldImplicitlyMoveCommentedIssueToTodo({
           issueStatus: existing.status,
           assigneeAgentId: requestedAssigneeAgentId,
           actorType: actor.actorType,
@@ -4115,7 +4118,21 @@ export function issueRoutes(
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    if (!(await assertAgentIssueMutationAllowed(req, res, issue))) return;
+    const actor = getActorInfo(req);
+    const suppressAgentCloseoutCommentWake = shouldSuppressAgentCloseoutCommentWake({
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      actorRunId: actor.runId,
+      assigneeAgentId: issue.assigneeAgentId,
+      body: req.body.body,
+    });
+    const closeoutCommentOnly =
+      suppressAgentCloseoutCommentWake &&
+      req.actor.type === "agent" &&
+      req.body.reopen !== true &&
+      req.body.resume !== true &&
+      req.body.interrupt !== true;
+    if (!closeoutCommentOnly && !(await assertAgentIssueMutationAllowed(req, res, issue))) return;
     if (!assertStructuredCommentFieldsAllowed(req, res, {
       presentation: req.body.presentation,
       metadata: req.body.metadata,
@@ -4126,7 +4143,6 @@ export function issueRoutes(
       return;
     }
 
-    const actor = getActorInfo(req);
     const reopenRequested = req.body.reopen === true;
     const resumeRequested = req.body.resume === true;
     const interruptRequested = req.body.interrupt === true;
@@ -4135,22 +4151,25 @@ export function issueRoutes(
       if (!(await assertExplicitResumeIntentAllowed(req, res, issue))) return;
     }
     const isClosed = isClosedIssueStatus(issue.status);
-    const suppressAgentCloseoutCommentWake = shouldSuppressAgentCloseoutCommentWake({
-      actorType: actor.actorType,
-      actorId: actor.actorId,
-      actorRunId: actor.runId,
-      assigneeAgentId: issue.assigneeAgentId,
-      body: req.body.body,
-    });
-    const effectiveReopenRequested =
-      reopenRequested ||
+    const isBlocked = issue.status === "blocked";
+    const explicitMoveToTodoRequested = reopenRequested || resumeRequested === true;
+    const effectiveMoveToTodoRequested =
+      explicitMoveToTodoRequested ||
       (!suppressAgentCloseoutCommentWake &&
-      shouldImplicitlyReopenCommentForAgent({
+      shouldImplicitlyMoveCommentedIssueToTodo({
         issueStatus: issue.status,
         assigneeAgentId: issue.assigneeAgentId,
         actorType: actor.actorType,
         actorId: actor.actorId,
       }));
+    const hasUnresolvedFirstClassBlockers =
+      isBlocked && effectiveMoveToTodoRequested
+        ? (await svc.getDependencyReadiness(issue.id)).unresolvedBlockerCount > 0
+        : false;
+    if (resumeRequested === true && isBlocked && hasUnresolvedFirstClassBlockers) {
+      res.status(409).json({ error: "Issue follow-up blocked by unresolved blockers" });
+      return;
+    }
     let reopened = false;
     let reopenFromStatus: string | null = null;
     let interruptedRunId: string | null = null;

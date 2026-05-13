@@ -151,7 +151,7 @@ describe("codex remote environment diagnostics", () => {
     expect(restoreWorkspace).toHaveBeenCalledTimes(1);
   });
 
-  it("avoids /tmp CODEX_HOME for remote API-key hello probes", async () => {
+  it("strips OPENAI_API_KEY and uses managed CODEX_HOME for remote probes", async () => {
     const remoteTarget: AdapterExecutionTarget = {
       kind: "remote",
       transport: "sandbox",
@@ -187,7 +187,14 @@ describe("codex remote environment diagnostics", () => {
     const probeCall = runAdapterExecutionTargetProcess.mock.calls[0] as unknown as
       | [string, AdapterExecutionTarget, string, string[], { cwd: string; env: Record<string, string> }]
       | undefined;
-    expect(probeCall?.[4].env.CODEX_HOME).toContain("/remote/workspace/.paperclip-runtime/codex/probe-home-codex-envtest-");
+    expect(prepareManagedCodexHome).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Function),
+      "company-1",
+      { apiKey: null },
+    );
+    expect(probeCall?.[4].env.CODEX_HOME).toBe("/remote/workspace/.paperclip-runtime/runs/test/workspace/.paperclip-runtime/codex/home");
+    expect(probeCall?.[4].env.OPENAI_API_KEY).toBe("");
     expect(probeCall?.[4].env.CODEX_HOME?.startsWith("/tmp/")).toBe(false);
     expect(probeCall?.[3]).toContain("--skip-git-repo-check");
   });

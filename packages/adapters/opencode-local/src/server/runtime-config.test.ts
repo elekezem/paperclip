@@ -76,4 +76,39 @@ describe("prepareOpenCodeRuntimeConfig", () => {
     expect(prepared.notes).toEqual([]);
     await prepared.cleanup();
   });
+
+  it("stages only a minimal config for remote execution targets", async () => {
+    const configHome = await makeConfigHome({
+      theme: "system",
+      permission: { read: "allow" },
+    });
+    await fs.mkdir(path.join(configHome, "opencode", "node_modules", "large"), { recursive: true });
+    await fs.writeFile(path.join(configHome, "opencode", "node_modules", "large", "payload"), "do not copy", "utf8");
+
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: { XDG_CONFIG_HOME: configHome },
+      config: {},
+      targetIsRemote: true,
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+
+    expect(prepared.env.XDG_CONFIG_HOME).not.toBe(configHome);
+    await expect(
+      fs.access(path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "node_modules")),
+    ).rejects.toThrow();
+    const runtimeConfig = JSON.parse(
+      await fs.readFile(
+        path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json"),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    expect(runtimeConfig).toEqual({
+      permission: {
+        external_directory: "allow",
+      },
+    });
+
+    await prepared.cleanup();
+    cleanupPaths.delete(prepared.env.XDG_CONFIG_HOME);
+  });
 });

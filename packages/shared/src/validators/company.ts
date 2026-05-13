@@ -8,6 +8,7 @@ const logoAssetIdSchema = z.string().uuid().nullable().optional();
 const brandColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional();
 const feedbackDataSharingTermsVersionSchema = z.string().min(1).nullable().optional();
 const issuePrefixSchema = z.string().trim().toUpperCase().regex(/^[A-Z][A-Z0-9]{1,11}$/).optional();
+const attachmentMaxBytesSchema = z.number().int().min(1).max(MAX_COMPANY_ATTACHMENT_MAX_BYTES).nullable();
 
 export const createCompanySchema = z.object({
   name: z.string().min(1),

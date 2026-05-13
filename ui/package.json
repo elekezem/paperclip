@@ -34,6 +34,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@lexical/link": "0.44.0",
     "@mdxeditor/editor": "^3.55.0",
+    "@paperclipai/adapter-acpx-local": "workspace:^",
     "@paperclipai/adapter-claude-local": "workspace:*",
     "@paperclipai/adapter-codex-local": "workspace:*",
     "@paperclipai/adapter-cursor-cloud": "workspace:*",
@@ -62,6 +63,7 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@storybook/react-vite": "^10.3.6",
     "@tailwindcss/vite": "^4.2.4",
     "@types/node": "^25.2.3",
     "@types/react": "^19.0.8",

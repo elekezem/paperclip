@@ -20,7 +20,14 @@ import { SIDEBAR_SCROLL_RESET_STATE } from "../lib/navigation-scroll";
 import { queryKeys } from "../lib/queryKeys";
 import { cn, agentRouteRef, agentUrl } from "../lib/utils";
 import { useAgentOrder } from "../hooks/useAgentOrder";
-import { useI18n } from "../context/LocaleContext";
+import {
+  AGENT_SORT_MODE_UPDATED_EVENT,
+  getAgentSortModeStorageKey,
+  readAgentSortMode,
+  type AgentSortModeUpdatedDetail,
+  type AgentSidebarSortMode,
+  writeAgentSortMode,
+} from "../lib/agent-order";
 import { AgentIcon } from "./AgentIconPicker";
 import { BudgetSidebarMarker } from "./BudgetSidebarMarker";
 import { SidebarSection, type SidebarSectionRadioChoice } from "./SidebarSection";
@@ -190,8 +197,7 @@ export function SidebarAgents() {
   const [pendingAgentIds, setPendingAgentIds] = useState<Set<string>>(() => new Set());
   const queryClient = useQueryClient();
   const { selectedCompanyId } = useCompany();
-  const { t } = useI18n();
-  const { openNewAgent } = useDialog();
+  const { openNewAgent } = useDialogActions();
   const { isMobile, setSidebarOpen } = useSidebar();
   const { pushToast } = useToastActions();
   const location = useLocation();
@@ -338,77 +344,42 @@ export function SidebarAgents() {
   });
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="group">
-        <div className="flex items-center px-3 py-1.5">
-          <CollapsibleTrigger className="flex items-center gap-1 flex-1 min-w-0">
-            <ChevronRight
-              className={cn(
-                "h-3 w-3 text-muted-foreground/60 transition-transform opacity-0 group-hover:opacity-100",
-                open && "rotate-90"
-              )}
-            />
-            <span className="text-[10px] font-medium uppercase tracking-widest font-mono text-muted-foreground/60">
-              {t("sidebar.agents")}
-            </span>
-          </CollapsibleTrigger>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              openNewAgent();
-            }}
-            className="flex items-center justify-center h-4 w-4 rounded text-muted-foreground/60 hover:text-foreground hover:bg-accent/50 transition-colors"
-            aria-label={t("sidebar.agents.new")}
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-
-      <CollapsibleContent>
-        <div className="flex flex-col gap-0.5 mt-0.5">
-          {orderedAgents.map((agent: Agent) => {
-            const runCount = liveCountByAgent.get(agent.id) ?? 0;
-            return (
-              <NavLink
-                key={agent.id}
-                to={activeTab ? `${agentUrl(agent)}/${activeTab}` : agentUrl(agent)}
-                state={SIDEBAR_SCROLL_RESET_STATE}
-                onClick={() => {
-                  if (isMobile) setSidebarOpen(false);
-                }}
-                className={cn(
-                  "flex items-center gap-2.5 px-3 py-1.5 text-[13px] font-medium transition-colors",
-                  activeAgentId === agentRouteRef(agent)
-                    ? "bg-accent text-foreground"
-                    : "text-foreground/80 hover:bg-accent/50 hover:text-foreground"
-                )}
-              >
-                <AgentIcon icon={agent.icon} className="shrink-0 h-3.5 w-3.5 text-muted-foreground" />
-                <span className="flex-1 truncate">{agent.name}</span>
-                {(agent.pauseReason === "budget" || runCount > 0) && (
-                  <span className="ml-auto flex items-center gap-1.5 shrink-0">
-                    {agent.pauseReason === "budget" ? (
-                      <BudgetSidebarMarker title={t("sidebar.agents.pausedByBudget")} />
-                    ) : null}
-                    {runCount > 0 ? (
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-                      </span>
-                    ) : null}
-                    {runCount > 0 ? (
-                      <span className="text-[11px] font-medium text-blue-600 dark:text-blue-400">
-                        {t("sidebar.agents.liveRuns", { count: runCount })}
-                      </span>
-                    ) : null}
-                  </span>
-                )}
-              </NavLink>
-            );
-          })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    <SidebarSection
+      label="Agents"
+      collapsible={{ open, onOpenChange: setOpen }}
+      headerAction={{
+        ariaLabel: "New agent",
+        icon: Plus,
+        onClick: openNewAgent,
+      }}
+      menu={{
+        ariaLabel: "Agents section actions",
+        actions: [
+          { type: "item", label: "Browse agents", icon: Users, href: "/agents/all" },
+          { type: "separator" },
+        ],
+        radioLabel: "Agent sort",
+        radioChoices: AGENT_SORT_CHOICES,
+        radioValue: sortMode,
+        onRadioValueChange: persistSortMode,
+      }}
+    >
+      {sortedAgents.map((agent: Agent) => {
+        const runCount = liveCountByAgent.get(agent.id) ?? 0;
+        return (
+          <SidebarAgentItem
+            key={agent.id}
+            activeAgentId={activeAgentId}
+            activeTab={activeTab}
+            agent={agent}
+            disabled={pendingAgentIds.has(agent.id)}
+            isMobile={isMobile}
+            onPauseResume={(targetAgent, action) => pauseResumeAgent.mutate({ agent: targetAgent, action })}
+            runCount={runCount}
+            setSidebarOpen={setSidebarOpen}
+          />
+        );
+      })}
+    </SidebarSection>
   );
 }

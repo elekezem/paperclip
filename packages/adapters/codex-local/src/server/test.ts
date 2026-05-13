@@ -26,6 +26,7 @@ import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { codexHomeDir, readCodexAuthInfo } from "./quota.js";
 import { buildCodexExecArgs } from "./codex-args.js";
 import { resolveCodexCommand } from "./command.js";
+import { prepareManagedCodexHome } from "./codex-home.js";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {
   if (checks.some((check) => check.level === "error")) return "fail";
@@ -171,7 +172,22 @@ export async function testEnvironment(
     bundledCodexExists:
       process.platform === "darwin" && existsSync("/Applications/Codex.app/Contents/Resources/codex"),
   });
-  const cwd = asString(config.cwd, process.cwd());
+  const target = ctx.executionTarget ?? null;
+  const targetIsRemote = target?.kind === "remote";
+  const targetIsSandbox = target?.kind === "remote" && target.transport === "sandbox";
+  const cwd = resolveAdapterExecutionTargetCwd(target, asString(config.cwd, ""), process.cwd());
+  const targetLabel = targetIsRemote
+    ? ctx.environmentName ?? describeAdapterExecutionTarget(target)
+    : null;
+  const runId = `codex-envtest-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  if (targetLabel) {
+    checks.push({
+      code: "codex_environment_target",
+      level: "info",
+      message: `Probing inside environment: ${targetLabel}`,
+    });
+  }
 
   try {
     await ensureAdapterExecutionTargetDirectory(runId, target, cwd, {
@@ -199,6 +215,15 @@ export async function testEnvironment(
     if (typeof value === "string") env[key] = value;
   }
   const runtimeEnv = ensurePathInEnv(stripOpenAiApiKey({ ...process.env, ...env }));
+  const installCheck = await maybeRunSandboxInstallCommand({
+    runId,
+    target,
+    adapterKey: "codex",
+    installCommand: SANDBOX_INSTALL_COMMAND,
+    detectCommand: command,
+    env: stripOpenAiApiKey(env),
+  });
+  if (installCheck) checks.push(installCheck);
   try {
     await ensureAdapterExecutionTargetCommandResolvable(command, target, cwd, runtimeEnv);
     checks.push({
@@ -227,22 +252,24 @@ export async function testEnvironment(
       hint: "Remove OPENAI_API_KEY from the Codex runtime if you no longer need legacy OpenAI Platform API flows.",
     });
   }
-  const codexHome = isNonEmpty(env.CODEX_HOME) ? env.CODEX_HOME : undefined;
-  const codexAuth = await readCodexAuthInfo(codexHome).catch(() => null);
-  if (codexAuth) {
-    checks.push({
-      code: "codex_native_auth_present",
-      level: "info",
-      message: "Codex is authenticated via its own auth configuration.",
-      detail: codexAuth.email ? `Logged in as ${codexAuth.email}.` : `Credentials found in ${path.join(codexHome ?? codexHomeDir(), "auth.json")}.`,
-    });
-  } else {
-    checks.push({
-      code: "codex_native_auth_missing",
-      level: "warn",
-      message: "Codex native auth is not configured. Codex runs may fail until `codex login` completes.",
-      hint: "Run `codex login` to authenticate with ChatGPT/Codex OAuth, then retry the probe.",
-    });
+  if (!targetIsRemote) {
+    const codexHome = isNonEmpty(env.CODEX_HOME) ? env.CODEX_HOME : undefined;
+    const codexAuth = await readCodexAuthInfo(codexHome).catch(() => null);
+    if (codexAuth) {
+      checks.push({
+        code: "codex_native_auth_present",
+        level: "info",
+        message: "Codex is authenticated via its own auth configuration.",
+        detail: codexAuth.email ? `Logged in as ${codexAuth.email}.` : `Credentials found in ${path.join(codexHome ?? codexHomeDir(), "auth.json")}.`,
+      });
+    } else {
+      checks.push({
+        code: "codex_native_auth_missing",
+        level: "warn",
+        message: "Codex native auth is not configured. Codex runs may fail until `codex login` completes.",
+        hint: "Run `codex login` to authenticate with ChatGPT/Codex OAuth, then retry the probe.",
+      });
+    }
   }
 
   const canRunProbe =
@@ -279,16 +306,6 @@ export async function testEnvironment(
         });
       }
 
-      // Codex CLI (>= 0.122) ignores the OPENAI_API_KEY env var and only reads
-      // credentials from $CODEX_HOME/auth.json. When we have a key available,
-      // wrap the probe with a shell that materializes a per-run auth.json so
-      // the CLI can authenticate. The key content is passed via env (not on
-      // the command line) to avoid leaking it into process listings.
-      const probeApiKey = isNonEmpty(configOpenAiKey)
-        ? configOpenAiKey
-        : isNonEmpty(hostOpenAiKey)
-          ? hostOpenAiKey
-          : null;
       const preparedProbe = await prepareCodexHelloProbe({
         runId,
         companyId: ctx.companyId,
@@ -297,58 +314,70 @@ export async function testEnvironment(
         cwd,
         command,
         args,
-        {
-          cwd,
-          env: stripOpenAiApiKey(env),
-          timeoutSec: 45,
-          graceSec: 5,
-          stdin: "Respond with hello.",
-          onLog: async () => {},
-        },
-      );
-      const parsed = parseCodexJsonl(probe.stdout);
-      const detail = summarizeProbeDetail(probe.stdout, probe.stderr, parsed.errorMessage);
-      const authEvidence = `${parsed.errorMessage ?? ""}\n${probe.stdout}\n${probe.stderr}`.trim();
+        env: stripOpenAiApiKey(env),
+        probeApiKey: null,
+      });
+      try {
+        const probe = await runAdapterExecutionTargetProcess(
+          runId,
+          target,
+          preparedProbe.command,
+          preparedProbe.args,
+          {
+            cwd,
+            env: preparedProbe.env,
+            timeoutSec: 45,
+            graceSec: 5,
+            stdin: "Respond with hello.",
+            onLog: async () => {},
+          },
+        );
+        const parsed = parseCodexJsonl(probe.stdout);
+        const detail = summarizeProbeDetail(probe.stdout, probe.stderr, parsed.errorMessage);
+        const authEvidence = `${parsed.errorMessage ?? ""}\n${probe.stdout}\n${probe.stderr}`.trim();
 
-      if (probe.timedOut) {
-        checks.push({
-          code: "codex_hello_probe_timed_out",
-          level: "warn",
-          message: "Codex hello probe timed out.",
-          hint: "Retry the probe. If this persists, verify Codex can run `Respond with hello` from this directory manually.",
-        });
-      } else if ((probe.exitCode ?? 1) === 0) {
-        const summary = parsed.summary.trim();
-        const hasHello = /\bhello\b/i.test(summary);
-        checks.push({
-          code: hasHello ? "codex_hello_probe_passed" : "codex_hello_probe_unexpected_output",
-          level: hasHello ? "info" : "warn",
-          message: hasHello
-            ? "Codex hello probe succeeded."
-            : "Codex probe ran but did not return `hello` as expected.",
-          ...(summary ? { detail: summary.replace(/\s+/g, " ").trim().slice(0, 240) } : {}),
-          ...(hasHello
-            ? {}
-            : {
-                hint: "Try the probe manually (`codex exec --json -` then prompt: Respond with hello) to inspect full output.",
-              }),
-        });
-      } else if (CODEX_AUTH_REQUIRED_RE.test(authEvidence)) {
-        checks.push({
-          code: "codex_hello_probe_auth_required",
-          level: "warn",
-          message: "Codex CLI is installed, but authentication is not ready.",
-          ...(detail ? { detail } : {}),
-          hint: "Run `codex login` to restore ChatGPT/Codex OAuth, then retry the probe.",
-        });
-      } else {
-        checks.push({
-          code: "codex_hello_probe_failed",
-          level: "error",
-          message: "Codex hello probe failed.",
-          ...(detail ? { detail } : {}),
-          hint: "Run `codex exec --json -` manually in this working directory and prompt `Respond with hello` to debug.",
-        });
+        if (probe.timedOut) {
+          checks.push({
+            code: "codex_hello_probe_timed_out",
+            level: "warn",
+            message: "Codex hello probe timed out.",
+            hint: "Retry the probe. If this persists, verify Codex can run `Respond with hello` from this directory manually.",
+          });
+        } else if ((probe.exitCode ?? 1) === 0) {
+          const summary = parsed.summary.trim();
+          const hasHello = /\bhello\b/i.test(summary);
+          checks.push({
+            code: hasHello ? "codex_hello_probe_passed" : "codex_hello_probe_unexpected_output",
+            level: hasHello ? "info" : "warn",
+            message: hasHello
+              ? "Codex hello probe succeeded."
+              : "Codex probe ran but did not return `hello` as expected.",
+            ...(summary ? { detail: summary.replace(/\s+/g, " ").trim().slice(0, 240) } : {}),
+            ...(hasHello
+              ? {}
+              : {
+                  hint: "Try the probe manually (`codex exec --json -` then prompt: Respond with hello) to inspect full output.",
+                }),
+          });
+        } else if (CODEX_AUTH_REQUIRED_RE.test(authEvidence)) {
+          checks.push({
+            code: "codex_hello_probe_auth_required",
+            level: "warn",
+            message: "Codex CLI is installed, but authentication is not ready.",
+            ...(detail ? { detail } : {}),
+            hint: "Run `codex login` to restore ChatGPT/Codex OAuth, then retry the probe.",
+          });
+        } else {
+          checks.push({
+            code: "codex_hello_probe_failed",
+            level: "error",
+            message: "Codex hello probe failed.",
+            ...(detail ? { detail } : {}),
+            hint: "Run `codex exec --json -` manually in this working directory and prompt `Respond with hello` to debug.",
+          });
+        }
+      } finally {
+        await preparedProbe.cleanup();
       }
     }
   }

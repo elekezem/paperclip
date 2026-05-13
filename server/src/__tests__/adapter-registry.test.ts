@@ -33,6 +33,7 @@ import {
   registerServerAdapter,
   requireServerAdapter,
   unregisterServerAdapter,
+  waitForExternalAdapters,
 } from "../adapters/index.js";
 import {
   resolveExternalAdapterRegistration,
@@ -57,14 +58,29 @@ const externalAdapter: ServerAdapterModule = {
 };
 
 describe("server adapter registry", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await waitForExternalAdapters();
     unregisterServerAdapter("external_test");
+    unregisterServerAdapter("hermes_local");
     unregisterServerAdapter("claude_local");
     setOverridePaused("claude_local", false);
+    registerServerAdapter(resolveExternalAdapterRegistration({
+      type: "hermes_local",
+      execute: hermesExecuteMock,
+      testEnvironment: async () => ({
+        adapterType: "hermes_local",
+        status: "pass",
+        checks: [],
+        testedAt: new Date(0).toISOString(),
+      }),
+      models: [],
+      supportsLocalAgentJwt: true,
+    }));
   });
 
   afterEach(() => {
     unregisterServerAdapter("external_test");
+    unregisterServerAdapter("hermes_local");
     unregisterServerAdapter("claude_local");
     setOverridePaused("claude_local", false);
     hermesExecuteMock.mockClear();

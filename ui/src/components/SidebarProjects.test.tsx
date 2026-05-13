@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Project } from "@paperclipai/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarProjects } from "./SidebarProjects";
+import { LocaleProvider } from "../context/LocaleContext";
 
 const mockProjectsApi = vi.hoisted(() => ({
   list: vi.fn(),
@@ -242,7 +243,9 @@ describe("SidebarProjects", () => {
     await act(async () => {
       currentRoot.render(
         <QueryClientProvider client={queryClient}>
-          <SidebarProjects />
+          <LocaleProvider>
+            <SidebarProjects />
+          </LocaleProvider>
         </QueryClientProvider>,
       );
     });

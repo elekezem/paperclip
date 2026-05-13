@@ -6,7 +6,7 @@ import type {
   AdapterEnvironmentTestContext,
   AdapterEnvironmentTestResult,
 } from "@paperclipai/adapter-utils";
-import path from "node:path";
+import type { AdapterExecutionTarget } from "@paperclipai/adapter-utils/execution-target";
 import {
   asBoolean,
   asString,
@@ -136,18 +136,45 @@ export async function testEnvironment(
       message: "Headless OpenCode external-directory permissions are auto-approved for unattended runs.",
     });
   }
-  let preparedRuntimeEnv: Record<string, string> | null = null;
-  const cleanupRuntimeConfigTasks: Array<() => Promise<void>> = [];
-  const baseRuntimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...env }));
-  const getRuntimeEnv = async () => {
-    if (!preparedRuntimeEnv) {
-      const preparedRuntimeConfig = await prepareOpenCodeRuntimeConfig({ env, config });
-      cleanupRuntimeConfigTasks.push(preparedRuntimeConfig.cleanup);
-      preparedRuntimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...preparedRuntimeConfig.env }));
-    }
-    return preparedRuntimeEnv;
-  };
+  const preparedRuntimeConfig = await prepareOpenCodeRuntimeConfig({ env, config, targetIsRemote });
+  const localRuntimeConfigHome =
+    preparedRuntimeConfig.notes.length > 0 ? preparedRuntimeConfig.env.XDG_CONFIG_HOME : "";
+  let restoreWorkspace: (() => Promise<void>) | null = null;
+  let preparedRuntimeWorkspaceLocalDir: string | null = null;
   try {
+    let runtimeTarget: AdapterExecutionTarget | null = target ?? null;
+    let runtimeCwd = cwd;
+    if (targetIsRemote) {
+      preparedRuntimeWorkspaceLocalDir = await fs.mkdtemp(path.join(os.tmpdir(), `paperclip-opencode-envtest-${runId}-`));
+      const preparedExecutionTargetRuntime = await prepareAdapterExecutionTargetRuntime({
+        runId,
+        target,
+        adapterKey: "opencode",
+        workspaceLocalDir: preparedRuntimeWorkspaceLocalDir,
+        workspaceRemoteDir: cwd,
+        installCommand: SANDBOX_INSTALL_COMMAND,
+        detectCommand: command,
+        assets: localRuntimeConfigHome
+          ? [{
+              key: "xdgConfig",
+              localDir: localRuntimeConfigHome,
+            }]
+          : [],
+      });
+      restoreWorkspace = async () => {
+        await preparedExecutionTargetRuntime.restoreWorkspace().catch(() => {});
+        if (preparedRuntimeWorkspaceLocalDir) {
+          await fs.rm(preparedRuntimeWorkspaceLocalDir, { recursive: true, force: true }).catch(() => {});
+        }
+      };
+      runtimeCwd = preparedExecutionTargetRuntime.workspaceRemoteDir ?? runtimeCwd;
+      runtimeTarget = overrideAdapterExecutionTargetRemoteCwd(target ?? null, runtimeCwd) ?? null;
+      if (localRuntimeConfigHome && preparedExecutionTargetRuntime.assetDirs.xdgConfig) {
+        preparedRuntimeConfig.env.XDG_CONFIG_HOME = preparedExecutionTargetRuntime.assetDirs.xdgConfig;
+      }
+    }
+    const runtimeEnv = normalizeEnv(ensurePathInEnv({ ...process.env, ...preparedRuntimeConfig.env }));
+
     const cwdInvalid = checks.some((check) => check.code === "opencode_cwd_invalid");
     if (cwdInvalid) {
       checks.push({
@@ -167,7 +194,7 @@ export async function testEnvironment(
       });
       if (installCheck) checks.push(installCheck);
       try {
-        await ensureCommandResolvable(command, cwd, baseRuntimeEnv);
+        await ensureAdapterExecutionTargetCommandResolvable(command, runtimeTarget, runtimeCwd, runtimeEnv);
         checks.push({
           code: "opencode_command_resolvable",
           level: "info",
@@ -199,8 +226,14 @@ export async function testEnvironment(
     let modelValidationPassed = false;
     const configuredModel = asString(config.model, "").trim();
 
-    if (canRunOpenCodeCommand && configuredModel) {
-      const runtimeEnv = await getRuntimeEnv();
+    if (targetIsRemote && configuredModel) {
+      checks.push({
+        code: "opencode_model_validation_skipped_remote",
+        level: "info",
+        message: `Skipped local model validation; will be validated by the hello probe inside ${targetLabel}.`,
+      });
+      modelValidationPassed = true;
+    } else if (canRunOpenCodeCommand && configuredModel) {
       try {
         const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv });
         if (discovered.length > 0) {
@@ -236,8 +269,7 @@ export async function testEnvironment(
           });
         }
       }
-    } else if (canRunOpenCodeCommand && !configuredModel) {
-      const runtimeEnv = await getRuntimeEnv();
+    } else if (!targetIsRemote && canRunOpenCodeCommand && !configuredModel) {
       try {
         const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv });
         if (discovered.length > 0) {
@@ -271,8 +303,7 @@ export async function testEnvironment(
     const modelUnavailable = checks.some((check) => check.code === "opencode_hello_probe_model_unavailable");
     if (!configuredModel && !modelUnavailable) {
       // No model configured – skip model requirement if no model-related checks exist
-    } else if (configuredModel && canRunOpenCodeCommand) {
-      const runtimeEnv = await getRuntimeEnv();
+    } else if (!targetIsRemote && configuredModel && canRunOpenCodeCommand) {
       try {
         await ensureOpenCodeModelConfiguredAndAvailable({
           model: configuredModel,
@@ -297,7 +328,6 @@ export async function testEnvironment(
     }
 
     if (canRunOpenCodeCommand && modelValidationPassed) {
-      const runtimeEnv = await getRuntimeEnv();
       const extraArgs = (() => {
         const fromExtraArgs = asStringArray(config.extraArgs);
         if (fromExtraArgs.length > 0) return fromExtraArgs;
@@ -390,9 +420,11 @@ export async function testEnvironment(
       }
     }
   } finally {
-    for (const cleanupRuntimeConfig of cleanupRuntimeConfigTasks) {
-      await cleanupRuntimeConfig();
+    await restoreWorkspace?.();
+    if (!restoreWorkspace && preparedRuntimeWorkspaceLocalDir) {
+      await fs.rm(preparedRuntimeWorkspaceLocalDir, { recursive: true, force: true }).catch(() => {});
     }
+    await preparedRuntimeConfig.cleanup();
   }
 
   return {

@@ -22,6 +22,7 @@ import {
   issueRelations,
   issueComments,
   issueDocuments,
+  issueApprovals,
   issueReadStates,
   issueThreadInteractions,
   issues,

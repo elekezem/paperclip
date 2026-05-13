@@ -51,8 +51,93 @@ type ProjectItemProps = {
   project: Project;
   projectSidebarSlots: ProjectSidebarSlot[];
   setSidebarOpen: (open: boolean) => void;
-}) {
+  isDragging?: boolean;
+};
+
+function projectTimestamp(project: Project): number {
+  const updated = new Date(project.updatedAt).getTime();
+  if (Number.isFinite(updated)) return updated;
+  const created = new Date(project.createdAt).getTime();
+  return Number.isFinite(created) ? created : 0;
+}
+
+function sortProjects(projects: Project[], sortMode: ProjectSidebarSortMode): Project[] {
+  if (sortMode === "top") return projects;
+  const sorted = [...projects];
+  if (sortMode === "alphabetical") {
+    sorted.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+    return sorted;
+  }
+  sorted.sort((left, right) => {
+    const timeDiff = projectTimestamp(right) - projectTimestamp(left);
+    return timeDiff !== 0 ? timeDiff : left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+  });
+  return sorted;
+}
+
+function ProjectItem({
+  activeProjectRef,
+  companyId,
+  companyPrefix,
+  isMobile,
+  project,
+  projectSidebarSlots,
+  setSidebarOpen,
+  isDragging = false,
+}: ProjectItemProps) {
   const { t } = useI18n();
+  const routeRef = projectRouteRef(project);
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <NavLink
+        to={`/projects/${routeRef}/issues`}
+        state={SIDEBAR_SCROLL_RESET_STATE}
+        onClick={(e) => {
+          if (isDragging) {
+            e.preventDefault();
+            return;
+          }
+          if (isMobile) setSidebarOpen(false);
+        }}
+        className={cn(
+          "flex items-center gap-2.5 px-3 py-1.5 text-[13px] font-medium transition-colors",
+          activeProjectRef === routeRef || activeProjectRef === project.id
+            ? "bg-accent text-foreground"
+            : "text-foreground/80 hover:bg-accent/50 hover:text-foreground",
+        )}
+      >
+        <span
+          className="shrink-0 h-3.5 w-3.5 rounded-sm"
+          style={{ backgroundColor: project.color ?? "#6366f1" }}
+        />
+        <span className="flex-1 truncate">{project.name}</span>
+        {project.pauseReason === "budget" ? <BudgetSidebarMarker title={t("sidebar.projects.pausedByBudget")} /> : null}
+      </NavLink>
+      {projectSidebarSlots.length > 0 && (
+        <div className="ml-5 flex flex-col gap-0.5">
+          {projectSidebarSlots.map((slot) => (
+            <PluginSlotMount
+              key={`${project.id}:${slot.pluginKey}:${slot.id}`}
+              slot={slot}
+              context={{
+                companyId,
+                companyPrefix,
+                projectId: project.id,
+                projectRef: routeRef,
+                entityId: project.id,
+                entityType: "project",
+              }}
+              missingBehavior="placeholder"
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SortableProjectItem(props: ProjectItemProps) {
   const {
     attributes,
     listeners,
@@ -74,51 +159,7 @@ type ProjectItemProps = {
       {...attributes}
       {...listeners}
     >
-      <div className="flex flex-col gap-0.5">
-        <NavLink
-          to={`/projects/${routeRef}/issues`}
-          state={SIDEBAR_SCROLL_RESET_STATE}
-          onClick={(e) => {
-            if (isDragging) {
-              e.preventDefault();
-              return;
-            }
-            if (isMobile) setSidebarOpen(false);
-          }}
-          className={cn(
-            "flex items-center gap-2.5 px-3 py-1.5 text-[13px] font-medium transition-colors",
-            activeProjectRef === routeRef || activeProjectRef === project.id
-              ? "bg-accent text-foreground"
-              : "text-foreground/80 hover:bg-accent/50 hover:text-foreground",
-          )}
-        >
-          <span
-            className="shrink-0 h-3.5 w-3.5 rounded-sm"
-            style={{ backgroundColor: project.color ?? "#6366f1" }}
-          />
-          <span className="flex-1 truncate">{project.name}</span>
-          {project.pauseReason === "budget" ? <BudgetSidebarMarker title={t("sidebar.projects.pausedByBudget")} /> : null}
-        </NavLink>
-        {projectSidebarSlots.length > 0 && (
-          <div className="ml-5 flex flex-col gap-0.5">
-            {projectSidebarSlots.map((slot) => (
-              <PluginSlotMount
-                key={`${project.id}:${slot.pluginKey}:${slot.id}`}
-                slot={slot}
-                context={{
-                  companyId,
-                  companyPrefix,
-                  projectId: project.id,
-                  projectRef: routeRef,
-                  entityId: project.id,
-                  entityType: "project",
-                }}
-                missingBehavior="placeholder"
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      <ProjectItem {...props} isDragging={isDragging} />
     </div>
   );
 }
@@ -127,7 +168,7 @@ export function SidebarProjects() {
   const [open, setOpen] = useState(true);
   const { selectedCompanyId, selectedCompany } = useCompany();
   const { t } = useI18n();
-  const { openNewProject } = useDialog();
+  const { openNewProject } = useDialogActions();
   const { isMobile, setSidebarOpen } = useSidebar();
   const location = useLocation();
 
@@ -252,34 +293,27 @@ export function SidebarProjects() {
   );
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <div className="group">
-        <div className="flex items-center px-3 py-1.5">
-          <CollapsibleTrigger className="flex items-center gap-1 flex-1 min-w-0">
-            <ChevronRight
-              className={cn(
-                "h-3 w-3 text-muted-foreground/60 transition-transform opacity-0 group-hover:opacity-100",
-                open && "rotate-90"
-              )}
-            />
-            <span className="text-[10px] font-medium uppercase tracking-widest font-mono text-muted-foreground/60">
-              {t("sidebar.projects")}
-            </span>
-          </CollapsibleTrigger>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              openNewProject();
-            }}
-            className="flex items-center justify-center h-4 w-4 rounded text-muted-foreground/60 hover:text-foreground hover:bg-accent/50 transition-colors"
-            aria-label={t("sidebar.projects.new")}
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-
-      <CollapsibleContent>
+    <SidebarSection
+      label={t("sidebar.projects")}
+      collapsible={{ open, onOpenChange: setOpen }}
+      headerAction={{
+        ariaLabel: t("sidebar.projects.new"),
+        icon: Plus,
+        onClick: openNewProject,
+      }}
+      menu={{
+        ariaLabel: "Projects section actions",
+        actions: [
+          { type: "item", label: "Browse projects", icon: FolderOpen, href: "/projects" },
+          { type: "separator" },
+        ],
+        radioLabel: "Project sort",
+        radioChoices: PROJECT_SORT_CHOICES,
+        radioValue: sortMode,
+        onRadioValueChange: persistSortMode,
+      }}
+    >
+      {isTopMode ? (
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}

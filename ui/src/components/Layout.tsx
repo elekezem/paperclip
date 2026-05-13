@@ -12,7 +12,6 @@ import { NewProjectDialog } from "./NewProjectDialog";
 import { NewGoalDialog } from "./NewGoalDialog";
 import { NewAgentDialog } from "./NewAgentDialog";
 import { KeyboardShortcutsCheatsheet } from "./KeyboardShortcutsCheatsheet";
-import { LanguageSwitcher } from "./LanguageSwitcher";
 import { ToastViewport } from "./ToastViewport";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { WorktreeBanner } from "./WorktreeBanner";
@@ -75,7 +74,6 @@ export function Layout() {
     selectionSource,
     setSelectedCompanyId,
   } = useCompany();
-  const { theme, toggleTheme } = useTheme();
   const { t } = useI18n();
   const { companyPrefix } = useParams<{ companyPrefix: string }>();
   const navigate = useNavigate();
@@ -90,8 +88,6 @@ export function Layout() {
   const [mobileNavVisible, setMobileNavVisible] = useState(true);
   const [instanceSettingsTarget, setInstanceSettingsTarget] = useState<string>(() => readRememberedInstanceSettingsPath());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const nextTheme = theme === "dark" ? "light" : "dark";
-  const nextThemeLabel = t(nextTheme === "dark" ? "common.theme.dark" : "common.theme.light");
   const matchedCompany = useMemo(() => {
     if (!companyPrefix) return null;
     const requestedPrefix = companyPrefix.toUpperCase();
@@ -383,53 +379,14 @@ export function Layout() {
             )}
           >
             <div className="flex flex-1 min-h-0 overflow-hidden">
-              <CompanyRail />
-              {isInstanceSettingsRoute ? <InstanceSidebar /> : <Sidebar />}
-            </div>
-            <div className="border-t border-r border-border px-3 py-2 bg-background">
-              <div className="flex items-center gap-1">
-                <a
-                  href="https://docs.paperclip.ing/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors text-foreground/80 hover:bg-accent/50 hover:text-foreground flex-1 min-w-0"
-                >
-                  <BookOpen className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{t("common.documentation")}</span>
-                </a>
-                {health?.version && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="px-2 text-xs text-muted-foreground shrink-0 cursor-default">v</span>
-                    </TooltipTrigger>
-                    <TooltipContent>v{health.version}</TooltipContent>
-                  </Tooltip>
+              <div className="w-60 shrink-0 overflow-hidden">
+                {isInstanceSettingsRoute ? (
+                  <InstanceSidebar />
+                ) : isCompanySettingsRoute ? (
+                  <CompanySettingsSidebar />
+                ) : (
+                  companySidebar
                 )}
-                <LanguageSwitcher />
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground shrink-0" asChild>
-                  <Link
-                    to={instanceSettingsTarget}
-                    state={SIDEBAR_SCROLL_RESET_STATE}
-                    aria-label={t("common.instanceSettings")}
-                    title={t("common.instanceSettings")}
-                    onClick={() => {
-                      if (isMobile) setSidebarOpen(false);
-                    }}
-                  >
-                    <Settings className="h-4 w-4" />
-                  </Link>
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground shrink-0"
-                  onClick={toggleTheme}
-                  aria-label={t("common.switchToTheme", { theme: nextThemeLabel })}
-                  title={t("common.switchToTheme", { theme: nextThemeLabel })}
-                >
-                  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                </Button>
               </div>
             </div>
             <SidebarAccountMenu
@@ -449,55 +406,7 @@ export function Layout() {
                 ) : (
                   companySidebar
                 )}
-              >
-                {isInstanceSettingsRoute ? <InstanceSidebar /> : <Sidebar />}
-              </div>
-            </div>
-            <div className="border-t border-r border-border px-3 py-2">
-              <div className="flex items-center gap-1">
-                <a
-                  href="https://docs.paperclip.ing/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors text-foreground/80 hover:bg-accent/50 hover:text-foreground flex-1 min-w-0"
-                >
-                  <BookOpen className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{t("common.documentation")}</span>
-                </a>
-                {health?.version && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="px-2 text-xs text-muted-foreground shrink-0 cursor-default">v</span>
-                    </TooltipTrigger>
-                    <TooltipContent>v{health.version}</TooltipContent>
-                  </Tooltip>
-                )}
-                <LanguageSwitcher />
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground shrink-0" asChild>
-                  <Link
-                    to={instanceSettingsTarget}
-                    state={SIDEBAR_SCROLL_RESET_STATE}
-                    aria-label={t("common.instanceSettings")}
-                    title={t("common.instanceSettings")}
-                    onClick={() => {
-                      if (isMobile) setSidebarOpen(false);
-                    }}
-                  >
-                    <Settings className="h-4 w-4" />
-                  </Link>
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground shrink-0"
-                  onClick={toggleTheme}
-                  aria-label={t("common.switchToTheme", { theme: nextThemeLabel })}
-                  title={t("common.switchToTheme", { theme: nextThemeLabel })}
-                >
-                  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                </Button>
-              </div>
+              </ResizableSidebarPane>
             </div>
             <SidebarAccountMenu
               deploymentMode={health?.deploymentMode}

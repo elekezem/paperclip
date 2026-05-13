@@ -18,6 +18,11 @@ export async function listCodexModels(): Promise<AdapterModel[]> {
   return dedupeModels(codexFallbackModels);
 }
 
+export async function refreshCodexModels(): Promise<AdapterModel[]> {
+  // AKESO policy: refresh is intentionally offline and subscription-auth only.
+  return listCodexModels();
+}
+
 export function resetCodexModelsCacheForTests() {
   // no-op: model listing no longer performs network discovery or caching
 }

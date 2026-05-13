@@ -38,10 +38,27 @@ describe("companyService", () => {
       constraint_name: "companies_issue_prefix_idx",
     });
     const wrappedDuplicate = Object.assign(new Error("Failed query"), { cause: duplicateCause });
+    const environment = {
+      id: "environment-1",
+      companyId: created.id,
+      name: "Local",
+      description: null,
+      driver: "local",
+      status: "active",
+      config: {},
+      metadata: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
     const insertReturning = vi.fn()
       .mockRejectedValueOnce(wrappedDuplicate)
-      .mockResolvedValueOnce([created]);
-    const values = vi.fn(() => ({ returning: insertReturning }));
+      .mockResolvedValueOnce([created])
+      .mockResolvedValueOnce([environment]);
+    const insertChain = {
+      onConflictDoNothing: vi.fn(() => insertChain),
+      returning: insertReturning,
+    };
+    const values = vi.fn(() => insertChain);
     const db = {
       insert: vi.fn(() => ({ values })),
       select: vi.fn()

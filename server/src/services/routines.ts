@@ -51,6 +51,7 @@ import { trackRoutineRun } from "@paperclipai/shared/telemetry";
 import { conflict, forbidden, notFound, unauthorized, unprocessable } from "../errors.js";
 import { logger } from "../middleware/logger.js";
 import { getTelemetryClient } from "../telemetry.js";
+import { getConfiguredSecretProvider } from "../secrets/configured-provider.js";
 import { approvalService } from "./approvals.js";
 import { documentService } from "./documents.js";
 import { issueService } from "./issues.js";
@@ -395,7 +396,130 @@ function mergeRoutineRunPayload(
   };
 }
 
-export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeupDeps } = {}) {
+function normalizeRoutineDispatchFingerprintValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  if (value == null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map((item) => normalizeRoutineDispatchFingerprintValue(item));
+  if (isPlainRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, normalizeRoutineDispatchFingerprintValue(value[key])]),
+    );
+  }
+  return String(value);
+}
+
+function createRoutineDispatchFingerprint(input: {
+  payload: Record<string, unknown> | null;
+  projectId: string | null;
+  assigneeAgentId: string | null;
+  executionWorkspaceId?: string | null;
+  executionWorkspacePreference?: string | null;
+  executionWorkspaceSettings?: Record<string, unknown> | null;
+  title: string;
+  description: string | null;
+}) {
+  const canonical = JSON.stringify(normalizeRoutineDispatchFingerprintValue(input));
+  return crypto.createHash("sha256").update(canonical).digest("hex");
+}
+
+function readManagedRoutineIssueTemplate(defaultsJson: Record<string, unknown> | null | undefined) {
+  const value = defaultsJson?.issueTemplate;
+  if (!isPlainRecord(value)) return null;
+  return {
+    surfaceVisibility: typeof value.surfaceVisibility === "string" ? value.surfaceVisibility : null,
+    originId: typeof value.originId === "string" && value.originId.trim() ? value.originId.trim() : null,
+    billingCode: typeof value.billingCode === "string" && value.billingCode.trim() ? value.billingCode.trim() : null,
+  };
+}
+
+function routineUsesWorkspaceBranch(routine: typeof routines.$inferSelect) {
+  return (routine.variables ?? []).some((variable) => variable.name === WORKSPACE_BRANCH_ROUTINE_VARIABLE)
+    || extractRoutineVariableNames([routine.title, routine.description]).includes(WORKSPACE_BRANCH_ROUTINE_VARIABLE);
+}
+
+function routineRevisionSnapshotRoutine(routine: RoutineRow): RoutineRevisionSnapshotV1["routine"] {
+  return {
+    id: routine.id,
+    companyId: routine.companyId,
+    projectId: routine.projectId,
+    goalId: routine.goalId,
+    parentIssueId: routine.parentIssueId,
+    title: routine.title,
+    description: routine.description,
+    assigneeAgentId: routine.assigneeAgentId,
+    priority: routine.priority as RoutineRevisionSnapshotV1["routine"]["priority"],
+    status: routine.status as RoutineRevisionSnapshotV1["routine"]["status"],
+    concurrencyPolicy: routine.concurrencyPolicy as RoutineRevisionSnapshotV1["routine"]["concurrencyPolicy"],
+    catchUpPolicy: routine.catchUpPolicy as RoutineRevisionSnapshotV1["routine"]["catchUpPolicy"],
+    variables: routine.variables ?? [],
+  };
+}
+
+function routineRevisionSnapshotTrigger(trigger: RoutineTriggerRow): RoutineRevisionSnapshotV1["triggers"][number] {
+  return {
+    id: trigger.id,
+    kind: trigger.kind as RoutineRevisionSnapshotV1["triggers"][number]["kind"],
+    label: trigger.label,
+    enabled: trigger.enabled,
+    cronExpression: trigger.cronExpression,
+    timezone: trigger.timezone,
+    publicId: trigger.publicId,
+    signingMode: trigger.signingMode as RoutineRevisionSnapshotV1["triggers"][number]["signingMode"],
+    replayWindowSec: trigger.replayWindowSec,
+  };
+}
+
+async function buildRoutineRevisionSnapshot(
+  executor: Db,
+  routine: RoutineRow,
+): Promise<RoutineRevisionSnapshotV1> {
+  const triggers = await executor
+    .select()
+    .from(routineTriggers)
+    .where(and(eq(routineTriggers.companyId, routine.companyId), eq(routineTriggers.routineId, routine.id)))
+    .orderBy(asc(routineTriggers.createdAt), asc(routineTriggers.id));
+
+  return {
+    version: 1,
+    routine: routineRevisionSnapshotRoutine(routine),
+    triggers: triggers.map(routineRevisionSnapshotTrigger),
+  };
+}
+
+function canonicalSnapshot(value: RoutineRevisionSnapshotV1) {
+  return JSON.stringify(value);
+}
+
+function snapshotsMatch(left: RoutineRevisionSnapshotV1, right: RoutineRevisionSnapshotV1) {
+  return canonicalSnapshot(left) === canonicalSnapshot(right);
+}
+
+function routineCurrentFieldsMatch(left: RoutineRow, right: RoutineRow) {
+  return snapshotsMatch(
+    { version: 1, routine: routineRevisionSnapshotRoutine(left), triggers: [] },
+    { version: 1, routine: routineRevisionSnapshotRoutine(right), triggers: [] },
+  );
+}
+
+function mapRoutineRevision(row: typeof routineRevisions.$inferSelect): RoutineRevision {
+  return {
+    ...row,
+    snapshot: row.snapshot as RoutineRevisionSnapshotV1,
+  };
+}
+
+export function routineService(
+  db: Db,
+  deps: {
+    heartbeat?: IssueAssignmentWakeupDeps;
+    pluginWorkerManager?: PluginWorkerManager;
+  } = {},
+) {
   const approvalSvc = approvalService(db);
   const documentsSvc = documentService(db);
   const issueSvc = issueService(db);
@@ -868,18 +992,27 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
       .then((rows) => rows[0]?.issues ?? null);
   }
 
-  async function findOpenExecutionIssue(routine: typeof routines.$inferSelect, executor: Db = db) {
+  async function findOpenExecutionIssue(
+    routine: typeof routines.$inferSelect,
+    executor: Db = db,
+    dispatchFingerprint?: string | null,
+    origin?: { kind: string; id: string | null },
+  ) {
+    const fingerprintCondition = routineExecutionFingerprintCondition(dispatchFingerprint);
+    const originKind = origin?.kind ?? "routine_execution";
+    const originId = origin?.id ?? routine.id;
     return executor
       .select()
       .from(issues)
       .where(
         and(
           eq(issues.companyId, routine.companyId),
-          eq(issues.originKind, "routine_execution"),
-          eq(issues.originId, routine.id),
+          eq(issues.originKind, originKind),
+          eq(issues.originId, originId),
           inArray(issues.status, OPEN_ISSUE_STATUSES),
           isNull(issues.hiddenAt),
           isNotNull(issues.executionRunId),
+          ...(fingerprintCondition ? [fingerprintCondition] : []),
         ),
       )
       .orderBy(desc(issues.updatedAt), desc(issues.createdAt))
@@ -991,6 +1124,43 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
       configPath: routineWebhookSecretConfigPath(trigger.secretId),
     });
     return value;
+  }
+
+  async function touchIssueForUserInbox(
+    executor: Db,
+    input: {
+      companyId: string;
+      issueId: string;
+      userId: string;
+      touchedAt: Date;
+    },
+  ) {
+    await executor
+      .insert(issueReadStates)
+      .values({
+        companyId: input.companyId,
+        issueId: input.issueId,
+        userId: input.userId,
+        lastReadAt: input.touchedAt,
+        updatedAt: input.touchedAt,
+      })
+      .onConflictDoUpdate({
+        target: [issueReadStates.companyId, issueReadStates.issueId, issueReadStates.userId],
+        set: {
+          lastReadAt: input.touchedAt,
+          updatedAt: input.touchedAt,
+        },
+      });
+
+    await executor
+      .delete(issueInboxArchives)
+      .where(
+        and(
+          eq(issueInboxArchives.companyId, input.companyId),
+          eq(issueInboxArchives.issueId, input.issueId),
+          eq(issueInboxArchives.userId, input.userId),
+        ),
+      );
   }
 
   async function dispatchPiIdeaIntakeRun(input: {
@@ -1368,7 +1538,10 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
         const openExecutionIssue =
           input.routine.concurrencyPolicy === "always_enqueue"
             ? null
-            : await findOpenExecutionIssue(input.routine, txDb);
+            : await findOpenExecutionIssue(input.routine, txDb, dispatchFingerprint, {
+                kind: issueOriginKind,
+                id: issueOriginId,
+              });
         if (openExecutionIssue) {
           const status = input.routine.concurrencyPolicy === "skip_if_active" ? "skipped" : "coalesced";
           const updated = await finalizeRun(createdRun.id, {
@@ -1422,8 +1595,14 @@ export function routineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeup
           }
 
           const existingIssue =
-            await findLiveExecutionIssue(input.routine, txDb)
-            ?? await findOpenExecutionIssue(input.routine, txDb);
+            await findLiveExecutionIssue(input.routine, txDb, dispatchFingerprint, {
+              kind: issueOriginKind,
+              id: issueOriginId,
+            })
+            ?? await findOpenExecutionIssue(input.routine, txDb, dispatchFingerprint, {
+              kind: issueOriginKind,
+              id: issueOriginId,
+            });
           if (!existingIssue) throw error;
           const status = input.routine.concurrencyPolicy === "skip_if_active" ? "skipped" : "coalesced";
           if (manualRunnerUserId) {

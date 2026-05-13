@@ -37,6 +37,7 @@ describe("AKESO KNOWBASE plugin", () => {
       feedbackDataSharingConsentAt: null,
       feedbackDataSharingConsentByUserId: null,
       feedbackDataSharingTermsVersion: null,
+      attachmentMaxBytes: 10 * 1024 * 1024,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

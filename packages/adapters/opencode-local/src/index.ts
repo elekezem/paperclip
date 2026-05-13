@@ -2,6 +2,18 @@ import type { AdapterModelProfileDefinition } from "@paperclipai/adapter-utils";
 
 export const type = "opencode_local";
 export const label = "OpenCode (local)";
+export const SANDBOX_INSTALL_COMMAND =
+  'curl -fsSL https://opencode.ai/install | bash && ' +
+  'if [ -x "$HOME/.opencode/bin/opencode" ]; then ' +
+  'if [ "$(id -u)" -eq 0 ]; then ' +
+  'ln -sf "$HOME/.opencode/bin/opencode" /usr/local/bin/opencode; ' +
+  'elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then ' +
+  'sudo ln -sf "$HOME/.opencode/bin/opencode" /usr/local/bin/opencode; ' +
+  'else ' +
+  'mkdir -p "$HOME/.local/bin" && ' +
+  'ln -sf "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode"; ' +
+  'fi; ' +
+  'fi';
 
 export const DEFAULT_OPENCODE_LOCAL_MODEL = "qwen/qwen3.6-plus";
 
