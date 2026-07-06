@@ -35,6 +35,7 @@ import {
   accessService,
   approvalService,
   companySkillService,
+  mergeDesiredWeComSkillsForAdapter,
   budgetService,
   heartbeatService,
   issueApprovalService,
@@ -642,6 +643,7 @@ export function agentRoutes(db: Db) {
   ) {
     const runtimeSkillEntries = await companySkills.listRuntimeSkillEntries(companyId, {
       materializeMissing: shouldMaterializeRuntimeSkillsForAdapter(adapterType),
+      adapterType,
     });
     return {
       ...config,
@@ -655,7 +657,8 @@ export function agentRoutes(db: Db) {
     adapterConfig: Record<string, unknown>,
     requestedDesiredSkills: string[] | undefined,
   ) {
-    if (!requestedDesiredSkills) {
+    const requestedDefaults = mergeDesiredWeComSkillsForAdapter(adapterType, requestedDesiredSkills ?? []);
+    if (requestedDefaults.length === 0 && !requestedDesiredSkills) {
       return {
         adapterConfig,
         desiredSkills: null as string[] | null,
@@ -665,10 +668,11 @@ export function agentRoutes(db: Db) {
 
     const resolvedRequestedSkills = await companySkills.resolveRequestedSkillKeys(
       companyId,
-      requestedDesiredSkills,
+      requestedDefaults,
     );
     const runtimeSkillEntries = await companySkills.listRuntimeSkillEntries(companyId, {
       materializeMissing: shouldMaterializeRuntimeSkillsForAdapter(adapterType),
+      adapterType,
     });
     const requiredSkills = runtimeSkillEntries
       .filter((entry) => entry.required)
@@ -828,6 +832,7 @@ export function agentRoutes(db: Db) {
       );
       const runtimeSkillEntries = await companySkills.listRuntimeSkillEntries(agent.companyId, {
         materializeMissing: false,
+        adapterType: agent.adapterType,
       });
       const requiredSkills = runtimeSkillEntries.filter((entry) => entry.required).map((entry) => entry.key);
       res.json(buildUnsupportedSkillSnapshot(agent.adapterType, Array.from(new Set([...requiredSkills, ...preference.desiredSkills]))));

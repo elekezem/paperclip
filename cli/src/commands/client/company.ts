@@ -1,10 +1,12 @@
 import { Command } from "commander";
+import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import type {
   Company,
+  CompanyWeComStatus,
   FeedbackTrace,
   CompanyPortabilityFileEntry,
   CompanyPortabilityExportResult,
@@ -1059,6 +1061,44 @@ export function assertDeleteConfirmation(company: Company, opts: CompanyDeleteOp
   }
 }
 
+export function renderCompanyWeComStatus(status: CompanyWeComStatus): string {
+  const lines = [
+    `company=${status.companyId}`,
+    `state=${status.state}`,
+    `ready=${status.ready ? "yes" : "no"}`,
+    `skillsSeeded=${status.skillsSeeded ? "yes" : "no"}`,
+    `opencode=${status.commands.opencode.available ? (status.commands.opencode.resolvedPath ?? "available") : "missing"}`,
+    `wecomCli=${status.commands.wecomCli.available ? (status.commands.wecomCli.resolvedPath ?? "available") : "missing"}`,
+    `configDir=${status.config.configDir}`,
+    `tmpDir=${status.config.tmpDir}`,
+    `initialized=${status.config.initialized ? "yes" : "no"} (${status.config.configFileCount} files)`,
+  ];
+  if (status.missingSkillKeys.length > 0) {
+    lines.push(`missingSkills=${status.missingSkillKeys.join(",")}`);
+  }
+  if (status.nextAction) {
+    lines.push(`next=${status.nextAction}`);
+  }
+  return lines.join("\n");
+}
+
+async function runInteractiveWeComInit(command: string, env: NodeJS.ProcessEnv) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, ["init"], {
+      env,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`wecom-cli init exited with code ${code ?? "unknown"}.`));
+    });
+  });
+}
+
 function assertDeleteFlags(opts: CompanyDeleteOptions): void {
   if (!opts.yes) {
     throw new Error("Deletion requires --yes.");
@@ -1072,6 +1112,75 @@ function assertDeleteFlags(opts: CompanyDeleteOptions): void {
 
 export function registerCompanyCommands(program: Command): void {
   const company = program.command("company").description("Company operations");
+  const wecom = company.command("wecom").description("WeCom CLI operations for a company");
+
+  addCommonClientOptions(
+    wecom
+      .command("status")
+      .description("Show WeCom CLI readiness for a company")
+      .argument("<companyId>", "Company ID")
+      .action(async (companyId: string, opts: CompanyCommandOptions) => {
+        try {
+          const ctx = resolveCommandContext(opts);
+          const status = await ctx.api.get<CompanyWeComStatus>(`/api/companies/${companyId}/wecom/status`);
+          if (!status) {
+            throw new Error("WeCom status request returned no data.");
+          }
+          if (ctx.json) {
+            printOutput(status, { json: true });
+            return;
+          }
+          console.log(renderCompanyWeComStatus(status));
+        } catch (err) {
+          handleCommandError(err);
+        }
+      }),
+    { includeCompany: false },
+  );
+
+  addCommonClientOptions(
+    wecom
+      .command("init")
+      .description("Run official wecom-cli init for a company-scoped profile")
+      .argument("<companyId>", "Company ID")
+      .action(async (companyId: string, opts: CompanyCommandOptions) => {
+        try {
+          const ctx = resolveCommandContext(opts);
+          const status = await ctx.api.get<CompanyWeComStatus>(`/api/companies/${companyId}/wecom/status`);
+          if (!status) {
+            throw new Error("WeCom status request returned no data.");
+          }
+          if (!status.commands.wecomCli.available) {
+            throw new Error(status.nextAction ?? "wecom-cli is not available in PATH.");
+          }
+          await mkdir(status.config.configDir, { recursive: true });
+          await mkdir(status.config.tmpDir, { recursive: true });
+          if (!ctx.json) {
+            console.log(`Running wecom-cli init for company ${companyId}...`);
+          }
+          await runInteractiveWeComInit(
+            status.commands.wecomCli.resolvedPath ?? status.commands.wecomCli.command,
+            {
+              ...process.env,
+              WECOM_CLI_CONFIG_DIR: status.config.configDir,
+              WECOM_CLI_TMP_DIR: status.config.tmpDir,
+            },
+          );
+          const updated = await ctx.api.get<CompanyWeComStatus>(`/api/companies/${companyId}/wecom/status`);
+          if (!updated) {
+            throw new Error("Updated WeCom status request returned no data.");
+          }
+          if (ctx.json) {
+            printOutput(updated, { json: true });
+            return;
+          }
+          console.log(renderCompanyWeComStatus(updated));
+        } catch (err) {
+          handleCommandError(err);
+        }
+      }),
+    { includeCompany: false },
+  );
 
   addCommonClientOptions(
     company

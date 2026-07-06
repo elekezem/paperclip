@@ -14,6 +14,30 @@ The canonical model is:
 2. assign the company skill to the agent
 3. optionally do step 2 during hire/create with `desiredSkills`
 
+## Bundled WeCom Skills
+
+Paperclip now seeds the official WeCom skill bundle into every company library:
+
+- `paperclipai/paperclip/wecomcli-contact`
+- `paperclipai/paperclip/wecomcli-todo`
+- `paperclipai/paperclip/wecomcli-meeting`
+- `paperclipai/paperclip/wecomcli-msg`
+- `paperclipai/paperclip/wecomcli-schedule`
+- `paperclipai/paperclip/wecomcli-doc`
+
+Behavior:
+
+- These bundled skills are company-scoped and appear in the company library automatically.
+- In v1, Paperclip auto-adds them to `desiredSkills` for `opencode_local` agents.
+- `openclaw_gateway` does not consume this WeCom bundle in v1.
+- Skill seeding does **not** initialize or authenticate WeCom CLI for the company.
+
+Operational readiness:
+
+- Check readiness with `paperclipai company wecom status <company-id>`.
+- Initialize the company-scoped WeCom profile with `paperclipai company wecom init <company-id>`.
+- After a company export/import, run init again in the destination company. The encrypted WeCom CLI profile directory is not exported.
+
 ## Permission Model
 
 - Company skill reads: any same-company actor
@@ -183,6 +207,7 @@ curl -sS -X POST "$PAPERCLIP_API_URL/api/companies/$PAPERCLIP_COMPANY_ID/agents"
 ## Notes
 
 - Built-in Paperclip runtime skills are still added automatically when required by the adapter.
+- For `opencode_local`, Paperclip also auto-adds the bundled WeCom skill keys to the desired skill set.
 - If a reference is missing or ambiguous, the API returns `422`.
 - Prefer linking back to the relevant issue, approval, and agent when you comment about skill changes.
 - Use company portability routes when you need whole-package import/export, not just a skill:

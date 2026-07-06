@@ -6,6 +6,7 @@ import {
   buildDefaultImportSelectionState,
   buildImportSelectionCatalog,
   buildSelectedFilesFromImportSelection,
+  renderCompanyWeComStatus,
   renderCompanyImportPreview,
   renderCompanyImportResult,
   resolveCompanyImportApplyConfirmationMode,
@@ -107,6 +108,56 @@ describe("buildCompanyDashboardUrl", () => {
     expect(buildCompanyDashboardUrl("https://paperclip.example/app/", "PAP")).toBe(
       "https://paperclip.example/app/PAP/dashboard",
     );
+  });
+});
+
+describe("renderCompanyWeComStatus", () => {
+  it("renders a concise readiness summary", () => {
+    const rendered = renderCompanyWeComStatus({
+      companyId: "company-1",
+      state: "company_not_initialized",
+      ready: false,
+      skillsSeeded: true,
+      seededSkillKeys: [
+        "paperclipai/paperclip/wecomcli-contact",
+      ],
+      missingSkillKeys: [],
+      commands: {
+        opencode: {
+          name: "opencode",
+          command: "opencode",
+          available: true,
+          resolvedPath: "/usr/local/bin/opencode",
+          version: "opencode 1.0.0",
+        },
+        wecomCli: {
+          name: "wecom-cli",
+          command: "wecom-cli",
+          available: true,
+          resolvedPath: "/usr/local/bin/wecom-cli",
+          version: "wecom-cli 1.0.0",
+        },
+      },
+      config: {
+        instanceRoot: "/tmp/paperclip/instances/default",
+        companyRoot: "/tmp/paperclip/instances/default/wecom/company-1",
+        configDir: "/tmp/paperclip/instances/default/wecom/company-1/config",
+        tmpDir: "/tmp/paperclip/instances/default/wecom/company-1/tmp",
+        configExists: true,
+        tmpExists: true,
+        initialized: false,
+        configFileCount: 0,
+      },
+      initCommand: "wecom-cli init",
+      nextAction: "Run `paperclipai company wecom init company-1`.",
+    });
+
+    expect(rendered).toContain("company=company-1");
+    expect(rendered).toContain("state=company_not_initialized");
+    expect(rendered).toContain("opencode=/usr/local/bin/opencode");
+    expect(rendered).toContain("wecomCli=/usr/local/bin/wecom-cli");
+    expect(rendered).toContain("initialized=no (0 files)");
+    expect(rendered).toContain("next=Run `paperclipai company wecom init company-1`.");
   });
 });
 

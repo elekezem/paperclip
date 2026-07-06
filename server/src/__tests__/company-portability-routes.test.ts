@@ -30,6 +30,9 @@ const mockCompanyPortabilityService = vi.hoisted(() => ({
   previewImport: vi.fn(),
   importBundle: vi.fn(),
 }));
+const mockCompanyWeComService = vi.hoisted(() => ({
+  getStatus: vi.fn(),
+}));
 
 const mockLogActivity = vi.hoisted(() => vi.fn());
 const mockFeedbackService = vi.hoisted(() => ({
@@ -45,6 +48,7 @@ vi.mock("../services/index.js", () => ({
   budgetService: () => mockBudgetService,
   companyPortabilityService: () => mockCompanyPortabilityService,
   companyService: () => mockCompanyService,
+  companyWeComService: () => mockCompanyWeComService,
   feedbackService: () => mockFeedbackService,
   logActivity: mockLogActivity,
 }));

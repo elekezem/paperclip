@@ -1,7 +1,7 @@
 # Agent Runtime Guide
 
 Status: User-facing guide
-Last updated: 2026-03-26
+Last updated: 2026-04-07
 Audience: Operators setting up and running agents in Paperclip
 
 ## 1. What this system does
@@ -36,7 +36,7 @@ Built-in adapters:
 
 - `claude_local`: runs your local `claude` CLI
 - `codex_local`: runs your local `codex` CLI
-- `opencode_local`: runs your local `opencode` CLI
+- `opencode_local`: runs your local `opencode` CLI and is the only v1 path for WeCom CLI work
 - `cursor`: runs Cursor in background mode
 - `pi_local`: runs an embedded Pi agent locally
 - `hermes_local`: runs your local `hermes` CLI (`hermes-paperclip-adapter`)
@@ -49,6 +49,14 @@ External plugin adapters (install via the adapter manager or API):
 - `droid_local`: runs your local Factory Droid CLI (`@henkey/droid-paperclip-adapter`)
 
 For local CLI adapters (`claude_local`, `codex_local`, `opencode_local`, `hermes_local`, `droid_local`), Paperclip assumes the CLI is already installed and authenticated on the host machine.
+
+WeCom v1 note:
+
+- Enterprise WeCom actions must run on `opencode_local`.
+- `openclaw_gateway` is not a supported WeCom path in v1.
+- Paperclip injects company-scoped `WECOM_CLI_CONFIG_DIR` and `WECOM_CLI_TMP_DIR` into `opencode_local` runs so each company gets an isolated WeCom CLI profile.
+- Use `paperclipai company wecom status <company-id>` to check whether the host and company profile are ready.
+- Use `paperclipai company wecom init <company-id>` to run the official `wecom-cli init` flow for that company profile.
 
 ## 3.2 Runtime behavior
 
@@ -159,6 +167,13 @@ Typical failure causes:
 - prompt too broad or missing constraints
 - process timeout
 
+WeCom-specific failure causes:
+
+- `opencode` is not installed or not in `PATH`
+- `wecom-cli` is not installed or not in `PATH`
+- the company-scoped WeCom profile was never initialized
+- the task was routed to a non-`opencode_local` adapter
+
 Claude-specific note:
 
 - If `ANTHROPIC_API_KEY` is set in adapter env or host environment, Claude uses API-key auth instead of subscription login. Paperclip surfaces this as a warning in environment tests, not a hard error.
@@ -184,3 +199,8 @@ Start with least privilege where possible, and avoid exposing secrets in broad r
 5. Trigger a manual wakeup.
 6. Confirm run succeeds and session/token usage is recorded.
 7. Watch live updates and iterate prompt/config.
+
+For WeCom tasks:
+
+8. Confirm `paperclipai company wecom status <company-id>` reports `ready`.
+9. Use an `opencode_local` agent.

@@ -49,6 +49,7 @@ import { createPluginHostServiceCleanup } from "./services/plugin-host-service-c
 import { pluginRegistryService } from "./services/plugin-registry.js";
 import { createHostClientHandlers } from "@paperclipai/plugin-sdk";
 import type { BetterAuthSessionResult } from "./auth/better-auth.js";
+import { companyWeComService } from "./services/company-wecom.js";
 
 type UiMode = "none" | "static" | "vite-dev";
 const FEEDBACK_EXPORT_FLUSH_INTERVAL_MS = 5_000;
@@ -87,6 +88,14 @@ export async function createApp(
     resolveSession?: (req: ExpressRequest) => Promise<BetterAuthSessionResult | null>;
   },
 ) {
+  if (process.env.NODE_ENV !== "test") {
+    await companyWeComService(db).backfillAll().catch((error) => {
+      logger.warn({
+        err: error,
+      }, "Failed to backfill bundled WeCom skills and OpenCode desired skills");
+    });
+  }
+
   const app = express();
 
   app.use(express.json({

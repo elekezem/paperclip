@@ -67,6 +67,13 @@ curl -sS "$PAPERCLIP_API_URL/llms/agent-icons.txt" \
 - run prompt in adapter config (`promptTemplate` where applicable)
 - source issue linkage (`sourceIssueId` or `sourceIssueIds`) when this hire came from an issue
 
+WeCom-specific rule:
+
+- If the role needs Enterprise WeCom actions, use `adapterType="opencode_local"` in v1.
+- Paperclip automatically appends the bundled official WeCom skill set to `desiredSkills` for `opencode_local` agents.
+- Before relying on those skills, check host/company readiness with `paperclipai company wecom status <company-id>`.
+- If the company has not been initialized yet, run `paperclipai company wecom init <company-id>`.
+
 7. Submit hire request.
 
 ```sh
@@ -131,6 +138,8 @@ For each linked issue, either:
 Before sending a hire request:
 
 - if the role needs skills, make sure they already exist in the company library or install them first using the Paperclip company-skills workflow
+- Every company now seeds the official WeCom skill bundle by default. This creates capability entrypoints, but it does **not** authenticate the company automatically.
+- For WeCom-enabled roles, verify `paperclipai company wecom status <company-id>` reports `ready` before promising the workflow is usable.
 - Reuse proven config patterns from related agents where possible.
 - Set a concrete `icon` from `/llms/agent-icons.txt` so the new hire is identifiable in org and task views.
 - Avoid secrets in plain text unless required by adapter behavior.

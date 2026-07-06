@@ -79,6 +79,7 @@ my-adapter/
 ## Choosing an Adapter
 
 - **Need a coding agent?** Use `claude_local`, `codex_local`, `opencode_local`, `hermes_local`, or install `droid_local` as an external plugin
+- **Need Enterprise WeCom actions?** Use `opencode_local`. Paperclip v1 wires the official WeCom skill bundle and company-scoped `WECOM_CLI_CONFIG_DIR`/`WECOM_CLI_TMP_DIR` only for this adapter.
 - **Need to run a script or command?** Use `process`
 - **Need to call an external service?** Use `http`
 - **Need something custom?** [Create your own adapter](/adapters/creating-an-adapter) or [build an external adapter plugin](/adapters/external-adapters)

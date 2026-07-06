@@ -34,6 +34,12 @@ export type {
   CompanySkillFileUpdateRequest,
 } from "./company-skill.js";
 export type {
+  CompanyWeComStatusState,
+  CompanyWeComCommandStatus,
+  CompanyWeComConfigStatus,
+  CompanyWeComStatus,
+} from "./company-wecom.js";
+export type {
   AgentSkillSyncMode,
   AgentSkillState,
   AgentSkillOrigin,

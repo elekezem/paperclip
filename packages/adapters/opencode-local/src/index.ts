@@ -24,6 +24,7 @@ Don't use when:
 - You need webhook-style external invocation (use openclaw_gateway or http)
 - You only need one-shot shell commands (use process)
 - OpenCode CLI is not installed on the machine
+- You need Enterprise WeCom actions from openclaw_gateway (WeCom CLI support is opencode_local-only in v1)
 
 Core fields:
 - cwd (string, optional): default absolute working directory fallback for the agent process (created if missing when possible)
@@ -52,4 +53,7 @@ Notes:
 - When \`dangerouslySkipPermissions\` is enabled, Paperclip injects a temporary \
   runtime config with \`permission.external_directory=allow\` so headless runs do \
   not stall on approval prompts.
+- Paperclip also injects company-scoped \`WECOM_CLI_CONFIG_DIR\` and \
+  \`WECOM_CLI_TMP_DIR\` for WeCom CLI usage. If a task needs Enterprise WeCom \
+  actions, run it on \`opencode_local\`.
 `;

@@ -7,6 +7,7 @@
 - `GET /llms/agent-icons.txt`
 - `GET /api/companies/:companyId/agent-configurations`
 - `GET /api/companies/:companyId/skills`
+- `GET /api/companies/:companyId/wecom/status`
 - `POST /api/companies/:companyId/skills/import`
 - `GET /api/agents/:agentId/configuration`
 - `POST /api/agents/:agentId/skills/sync`
@@ -80,6 +81,12 @@ Response:
 If company setting disables required approval, `approval` is `null` and the agent is created as `idle`.
 
 `desiredSkills` accepts company skill ids, canonical keys, or a unique slug. The server resolves and stores canonical company skill keys.
+
+Special case for `opencode_local`:
+
+- Paperclip automatically adds the bundled WeCom skill keys to `desiredSkills`.
+- This only makes WeCom skills available at the Paperclip/company level. It does **not** initialize the company-scoped WeCom CLI profile.
+- Use `GET /api/companies/:companyId/wecom/status` or `paperclipai company wecom status <company-id>` to confirm the company is ready before scheduling WeCom work.
 
 ## Approval Lifecycle
 

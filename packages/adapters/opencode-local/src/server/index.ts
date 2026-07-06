@@ -64,6 +64,13 @@ export { execute } from "./execute.js";
 export { listOpenCodeSkills, syncOpenCodeSkills } from "./skills.js";
 export { testEnvironment } from "./test.js";
 export {
+  PAPERCLIP_WECOM_SKILL_SLUGS,
+  buildPaperclipWeComSkillKey,
+  listPaperclipWeComSkillKeys,
+  resolvePaperclipInstanceRootFromEnv,
+  resolveWeComCliDirectories,
+} from "./wecom.js";
+export {
   listOpenCodeModels,
   discoverOpenCodeModels,
   ensureOpenCodeModelConfiguredAndAvailable,

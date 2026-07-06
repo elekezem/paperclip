@@ -35,6 +35,14 @@ Common adapter choices:
 For `opencode_local`, configure an explicit `adapterConfig.model` (`provider/model`).
 Paperclip validates the selected model against live `opencode models` output.
 
+WeCom v1:
+
+- If an agent needs Enterprise WeCom actions, choose `opencode_local`.
+- Paperclip auto-adds the bundled WeCom skill bundle to `opencode_local` agents.
+- This does not authenticate WeCom automatically. Check `paperclipai company wecom status <company-id>` first.
+- If the company is not ready, run `paperclipai company wecom init <company-id>` on the host.
+- `openclaw_gateway` is not the WeCom path in v1.
+
 ## Agent Hiring via Governance
 
 Agents can request to hire subordinates. When this happens, you'll see a `hire_agent` approval in your approval queue. Review the proposed agent config and approve or reject.

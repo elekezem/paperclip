@@ -27,6 +27,7 @@ import { isOpenCodeUnknownSessionError, parseOpenCodeJsonl } from "./parse.js";
 import { ensureOpenCodeModelConfiguredAndAvailable } from "./models.js";
 import { removeMaintainerOnlySkillSymlinks } from "@paperclipai/adapter-utils/server-utils";
 import { prepareOpenCodeRuntimeConfig } from "./runtime-config.js";
+import { resolveWeComCliDirectories } from "./wecom.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -175,6 +176,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   for (const [key, value] of Object.entries(envConfig)) {
     if (typeof value === "string") env[key] = value;
   }
+  const wecomDirectories = resolveWeComCliDirectories(agent.companyId);
+  await fs.mkdir(wecomDirectories.configDir, { recursive: true });
+  await fs.mkdir(wecomDirectories.tmpDir, { recursive: true });
+  env.WECOM_CLI_CONFIG_DIR = wecomDirectories.configDir;
+  env.WECOM_CLI_TMP_DIR = wecomDirectories.tmpDir;
   // Prevent OpenCode from writing an opencode.json config file into the
   // project working directory (which would pollute the git repo).  Model
   // selection is already handled via the --model CLI flag.  Set after the

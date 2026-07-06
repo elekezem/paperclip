@@ -7,6 +7,10 @@ import type { Db } from "@paperclipai/db";
 import { companySkills } from "@paperclipai/db";
 import { readPaperclipSkillSyncPreference, writePaperclipSkillSyncPreference } from "@paperclipai/adapter-utils/server-utils";
 import type { PaperclipSkillEntry } from "@paperclipai/adapter-utils/server-utils";
+import {
+  PAPERCLIP_WECOM_SKILL_SLUGS,
+  buildPaperclipWeComSkillKey,
+} from "@paperclipai/adapter-opencode-local/server";
 import type {
   CompanySkill,
   CompanySkillCreateRequest,
@@ -85,6 +89,11 @@ type SkillSourceMeta = {
   workspaceId?: string;
   workspaceName?: string;
   workspaceCwd?: string;
+  requiredAdapters?: unknown;
+  paperclip?: {
+    requiredAdapters?: unknown;
+    bundle?: string;
+  };
 };
 
 export type LocalSkillInventoryMode = "full" | "project_root";
@@ -99,6 +108,7 @@ export type ProjectSkillScanTarget = {
 
 type RuntimeSkillEntryOptions = {
   materializeMissing?: boolean;
+  adapterType?: string;
 };
 
 const skillInventoryRefreshPromises = new Map<string, Promise<void>>();
@@ -146,6 +156,13 @@ const PROJECT_ROOT_SKILL_SUBDIRECTORIES = [
   "assets",
 ] as const;
 
+const PAPERCLIP_WECOM_BUNDLE_OWNER = "WecomTeam";
+const PAPERCLIP_WECOM_BUNDLE_REPO = "wecom-cli";
+const PAPERCLIP_WECOM_BUNDLE_COMMIT = "389aefd7ab2d66a70ff4bd8f46510748d0d6d40b";
+const PAPERCLIP_WECOM_BUNDLE_SOURCE = `https://github.com/${PAPERCLIP_WECOM_BUNDLE_OWNER}/${PAPERCLIP_WECOM_BUNDLE_REPO}/tree/${PAPERCLIP_WECOM_BUNDLE_COMMIT}/skills`;
+const PAPERCLIP_WECOM_BUNDLE_REQUIRED_ADAPTERS = ["opencode_local"] as const;
+const PAPERCLIP_WECOM_BUNDLE_SLUG_SET = new Set<string>(PAPERCLIP_WECOM_SKILL_SLUGS);
+
 function asString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -154,6 +171,16 @@ function asString(value: unknown): string | null {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function shouldSeedBundledWeComSkills() {
+  if (process.env.PAPERCLIP_DISABLE_WECOM_BUNDLED_SKILLS === "true") {
+    return false;
+  }
+  if (process.env.NODE_ENV === "test" && process.env.PAPERCLIP_ENABLE_WECOM_BUNDLED_SKILLS !== "true") {
+    return false;
+  }
+  return true;
 }
 
 function normalizePortablePath(input: string) {
@@ -1253,6 +1280,31 @@ function resolveDesiredSkillKeys(
   ));
 }
 
+function readBundledRequiredAdapters(skill: CompanySkill): string[] {
+  const metadata = getSkillMeta(skill);
+  const paperclip = isPlainRecord(metadata.paperclip) ? metadata.paperclip : null;
+  const raw = Array.isArray(paperclip?.requiredAdapters)
+    ? paperclip.requiredAdapters
+    : Array.isArray(metadata.requiredAdapters)
+      ? metadata.requiredAdapters
+      : [];
+  return Array.from(new Set(
+    raw
+      .filter((value: unknown): value is string => typeof value === "string")
+      .map((value: string) => value.trim())
+      .filter(Boolean),
+  ));
+}
+
+function isBundledSkillRequiredForAdapter(skill: CompanySkill, adapterType: string | null | undefined) {
+  const metadata = getSkillMeta(skill);
+  if (asString(metadata.sourceKind) !== "paperclip_bundled") return false;
+  const requiredAdapters = readBundledRequiredAdapters(skill);
+  if (requiredAdapters.length === 0) return true;
+  if (!adapterType) return false;
+  return requiredAdapters.includes(adapterType);
+}
+
 function normalizeSkillDirectory(skill: CompanySkill) {
   if ((skill.sourceType !== "local_path" && skill.sourceType !== "catalog") || !skill.sourceLocator) return null;
   const resolved = path.resolve(skill.sourceLocator);
@@ -1485,6 +1537,61 @@ export function companySkillService(db: Db) {
     return [];
   }
 
+  async function ensureBundledWeComSkills(companyId: string) {
+    if (!shouldSeedBundledWeComSkills()) return [];
+
+    const existing = await db
+      .select()
+      .from(companySkills)
+      .where(eq(companySkills.companyId, companyId))
+      .then((rows) => rows.map((row) => toCompanySkill(row)));
+
+    const existingByKey = new Map(existing.map((skill) => [skill.key, skill]));
+    const needsRefresh = PAPERCLIP_WECOM_SKILL_SLUGS.some((slug) => {
+      const key = buildPaperclipWeComSkillKey(slug);
+      const skill = existingByKey.get(key);
+      if (!skill) return true;
+      const metadata = getSkillMeta(skill);
+      return (
+        asString(metadata.sourceKind) !== "paperclip_bundled"
+        || asString(metadata.owner) !== PAPERCLIP_WECOM_BUNDLE_OWNER
+        || asString(metadata.repo) !== PAPERCLIP_WECOM_BUNDLE_REPO
+        || skill.sourceRef !== PAPERCLIP_WECOM_BUNDLE_COMMIT
+      );
+    });
+
+    if (!needsRefresh) {
+      return existing.filter((skill) => PAPERCLIP_WECOM_BUNDLE_SLUG_SET.has(skill.slug));
+    }
+
+    const { skills } = await readUrlSkillImports(companyId, PAPERCLIP_WECOM_BUNDLE_SOURCE);
+    const imported = skills
+      .filter((skill) => PAPERCLIP_WECOM_BUNDLE_SLUG_SET.has(skill.slug))
+      .map((skill) => ({
+        ...skill,
+        key: buildPaperclipWeComSkillKey(skill.slug as (typeof PAPERCLIP_WECOM_SKILL_SLUGS)[number]),
+        sourceType: "github" as const,
+        sourceLocator: `https://github.com/${PAPERCLIP_WECOM_BUNDLE_OWNER}/${PAPERCLIP_WECOM_BUNDLE_REPO}/tree/${PAPERCLIP_WECOM_BUNDLE_COMMIT}/skills/${skill.slug}`,
+        sourceRef: PAPERCLIP_WECOM_BUNDLE_COMMIT,
+        metadata: {
+          ...(skill.metadata ?? {}),
+          sourceKind: "paperclip_bundled",
+          owner: PAPERCLIP_WECOM_BUNDLE_OWNER,
+          repo: PAPERCLIP_WECOM_BUNDLE_REPO,
+          ref: PAPERCLIP_WECOM_BUNDLE_COMMIT,
+          trackingRef: PAPERCLIP_WECOM_BUNDLE_COMMIT,
+          repoSkillDir: `skills/${skill.slug}`,
+          paperclip: {
+            requiredAdapters: [...PAPERCLIP_WECOM_BUNDLE_REQUIRED_ADAPTERS],
+            bundle: "wecom-cli",
+          },
+        },
+      }));
+
+    if (imported.length === 0) return [];
+    return upsertImportedSkills(companyId, imported);
+  }
+
   async function pruneMissingLocalPathSkills(companyId: string) {
     const rows = await db
       .select()
@@ -1512,6 +1619,7 @@ export function companySkillService(db: Db) {
 
     const refreshPromise = (async () => {
       await ensureBundledSkills(companyId);
+      await ensureBundledWeComSkills(companyId);
       await pruneMissingLocalPathSkills(companyId);
     })();
 
@@ -1586,7 +1694,9 @@ export function companySkillService(db: Db) {
               agent.companyId,
               agent.adapterConfig as Record<string, unknown>,
             );
-            const runtimeSkillEntries = await listRuntimeSkillEntries(agent.companyId);
+            const runtimeSkillEntries = await listRuntimeSkillEntries(agent.companyId, {
+              adapterType: agent.adapterType,
+            });
             const snapshot = await adapter.listSkills({
               agentId: agent.id,
               companyId: agent.companyId,
@@ -2061,7 +2171,6 @@ export function companySkillService(db: Db) {
 
     const out: PaperclipSkillEntry[] = [];
     for (const skill of skills) {
-      const sourceKind = asString(getSkillMeta(skill).sourceKind);
       let source = normalizeSkillDirectory(skill);
       if (!source) {
         source = options.materializeMissing === false
@@ -2070,14 +2179,14 @@ export function companySkillService(db: Db) {
       }
       if (!source) continue;
 
-      const required = sourceKind === "paperclip_bundled";
+      const required = isBundledSkillRequiredForAdapter(skill, options.adapterType ?? null);
       out.push({
         key: skill.key,
         runtimeName: buildSkillRuntimeName(skill.key, skill.slug),
         source,
         required,
         requiredReason: required
-          ? "Bundled Paperclip skills are always available for local adapters."
+          ? "Bundled Paperclip skills are always available for this adapter."
           : null,
       });
     }
@@ -2352,6 +2461,7 @@ export function companySkillService(db: Db) {
     listFull,
     getById,
     getByKey,
+    ensureBundledWeComSkills,
     resolveRequestedSkillKeys: async (companyId: string, requestedReferences: string[]) => {
       const skills = await listFull(companyId);
       return resolveRequestedSkillKeysOrThrow(skills, requestedReferences);

@@ -73,6 +73,12 @@ paperclipai company export abc123 --out ./skills-only --include skills --skills 
 
 Secret values, machine-local paths, and database IDs are **never** exported.
 
+WeCom-specific note:
+
+- Company exports preserve company skill assignments, including the bundled WeCom skill keys.
+- Company exports do **not** include the company-scoped WeCom CLI profile under `WECOM_CLI_CONFIG_DIR`.
+- After importing into a different company or host, rerun `paperclipai company wecom init <company-id>` before assigning WeCom work.
+
 ## Importing a Company
 
 Import from a local directory, GitHub URL, or GitHub shorthand:

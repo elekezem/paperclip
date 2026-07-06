@@ -19,6 +19,9 @@ vi.mock("../services/index.js", () => ({
     previewImport: vi.fn(),
     importBundle: vi.fn(),
   }),
+  companyWeComService: () => ({
+    getStatus: vi.fn(),
+  }),
   accessService: () => ({
     canUser: vi.fn(),
     ensureMembership: vi.fn(),

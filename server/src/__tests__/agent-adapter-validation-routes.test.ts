@@ -73,6 +73,7 @@ vi.mock("../services/index.js", () => ({
   issueApprovalService: () => mockIssueApprovalService,
   issueService: () => ({}),
   logActivity: mockLogActivity,
+  mergeDesiredWeComSkillsForAdapter: (_adapterType: string, desiredSkills: string[]) => desiredSkills,
   secretService: () => mockSecretService,
   syncInstructionsBundleConfigFromFilePath: vi.fn((_agent, config) => config),
   workspaceOperationService: () => ({}),

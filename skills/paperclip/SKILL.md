@@ -138,6 +138,9 @@ Authorized managers can install company skills independently of hiring, then ass
 - Install and inspect company skills with the company skills API.
 - Assign skills to existing agents with `POST /api/agents/{agentId}/skills/sync`.
 - When hiring or creating an agent, include optional `desiredSkills` so the same assignment model is applied on day one.
+- Every company now auto-seeds the official WeCom skill bundle. In v1, those WeCom skills are auto-added to `opencode_local` agents only.
+- WeCom skill presence does not mean the company is authenticated. Check `paperclipai company wecom status <company-id>` and, if needed, run `paperclipai company wecom init <company-id>`.
+- Do not route WeCom work to `openclaw_gateway` in v1. Use `opencode_local`.
 
 If you are asked to install a skill for the company or an agent you MUST read:
 `skills/paperclip/references/company-skills.md`

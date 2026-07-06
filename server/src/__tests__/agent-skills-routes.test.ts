@@ -53,6 +53,15 @@ const mockSecretService = vi.hoisted(() => ({
 const mockLogActivity = vi.hoisted(() => vi.fn());
 const mockTrackAgentCreated = vi.hoisted(() => vi.fn());
 const mockGetTelemetryClient = vi.hoisted(() => vi.fn());
+const mockEnsureOpenCodeModelConfiguredAndAvailable = vi.hoisted(() => vi.fn());
+const mockBundledWeComSkillKeys = vi.hoisted(() => [
+  "paperclipai/paperclip/wecomcli-contact",
+  "paperclipai/paperclip/wecomcli-todo",
+  "paperclipai/paperclip/wecomcli-meeting",
+  "paperclipai/paperclip/wecomcli-msg",
+  "paperclipai/paperclip/wecomcli-schedule",
+  "paperclipai/paperclip/wecomcli-doc",
+]);
 
 const mockAdapter = vi.hoisted(() => ({
   listSkills: vi.fn(),
@@ -68,6 +77,16 @@ vi.mock("../telemetry.js", () => ({
   getTelemetryClient: mockGetTelemetryClient,
 }));
 
+vi.mock("@paperclipai/adapter-opencode-local/server", async () => {
+  const actual = await vi.importActual<typeof import("@paperclipai/adapter-opencode-local/server")>(
+    "@paperclipai/adapter-opencode-local/server",
+  );
+  return {
+    ...actual,
+    ensureOpenCodeModelConfiguredAndAvailable: mockEnsureOpenCodeModelConfiguredAndAvailable,
+  };
+});
+
 vi.mock("../services/index.js", () => ({
   agentService: () => mockAgentService,
   agentInstructionsService: () => mockAgentInstructionsService,
@@ -79,6 +98,10 @@ vi.mock("../services/index.js", () => ({
   issueApprovalService: () => mockIssueApprovalService,
   issueService: () => ({}),
   logActivity: mockLogActivity,
+  mergeDesiredWeComSkillsForAdapter: (adapterType: string, desiredSkills: string[]) =>
+    adapterType === "opencode_local"
+      ? Array.from(new Set([...desiredSkills, ...mockBundledWeComSkillKeys]))
+      : Array.from(new Set(desiredSkills)),
   secretService: () => mockSecretService,
   syncInstructionsBundleConfigFromFilePath: vi.fn((_agent, config) => config),
   workspaceOperationService: () => mockWorkspaceOperationService,
@@ -146,6 +169,9 @@ describe("agent skill routes", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockGetTelemetryClient.mockReturnValue({ track: vi.fn() });
+    mockEnsureOpenCodeModelConfiguredAndAvailable.mockResolvedValue([
+      { id: "openai/gpt-5.2-codex", label: "openai/gpt-5.2-codex" },
+    ]);
     mockAgentService.resolveByReference.mockResolvedValue({
       ambiguous: false,
       agent: makeAgent("claude_local"),
@@ -234,6 +260,7 @@ describe("agent skill routes", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(mockCompanySkillService.listRuntimeSkillEntries).toHaveBeenCalledWith("company-1", {
       materializeMissing: false,
+      adapterType: "claude_local",
     });
     expect(mockAdapter.listSkills).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -262,6 +289,7 @@ describe("agent skill routes", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(mockCompanySkillService.listRuntimeSkillEntries).toHaveBeenCalledWith("company-1", {
       materializeMissing: false,
+      adapterType: "codex_local",
     });
   });
 
@@ -282,6 +310,7 @@ describe("agent skill routes", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(mockCompanySkillService.listRuntimeSkillEntries).toHaveBeenCalledWith("company-1", {
       materializeMissing: true,
+      adapterType: "cursor",
     });
   });
 
@@ -295,6 +324,7 @@ describe("agent skill routes", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(mockCompanySkillService.listRuntimeSkillEntries).toHaveBeenCalledWith("company-1", {
       materializeMissing: false,
+      adapterType: "claude_local",
     });
     expect(mockAdapter.syncSkills).toHaveBeenCalled();
   });
@@ -438,6 +468,47 @@ describe("agent skill routes", () => {
     );
   });
 
+  it("defaults bundled WeCom desired skills for opencode_local agents", async () => {
+    const res = await request(createApp())
+      .post("/api/companies/company-1/agents")
+      .send({
+        name: "WeCom Operator",
+        role: "engineer",
+        adapterType: "opencode_local",
+        adapterConfig: {
+          model: "openai/gpt-5.2-codex",
+        },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(mockCompanySkillService.resolveRequestedSkillKeys).toHaveBeenCalledWith("company-1", [
+      "paperclipai/paperclip/wecomcli-contact",
+      "paperclipai/paperclip/wecomcli-todo",
+      "paperclipai/paperclip/wecomcli-meeting",
+      "paperclipai/paperclip/wecomcli-msg",
+      "paperclipai/paperclip/wecomcli-schedule",
+      "paperclipai/paperclip/wecomcli-doc",
+    ]);
+    expect(mockAgentService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        adapterConfig: expect.objectContaining({
+          paperclipSkillSync: expect.objectContaining({
+            desiredSkills: [
+              "paperclipai/paperclip/paperclip",
+              "paperclipai/paperclip/wecomcli-contact",
+              "paperclipai/paperclip/wecomcli-todo",
+              "paperclipai/paperclip/wecomcli-meeting",
+              "paperclipai/paperclip/wecomcli-msg",
+              "paperclipai/paperclip/wecomcli-schedule",
+              "paperclipai/paperclip/wecomcli-doc",
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
   it("includes canonical desired skills in hire approvals", async () => {
     const db = createDb(true);
 
@@ -460,6 +531,50 @@ describe("agent skill routes", () => {
           desiredSkills: ["paperclipai/paperclip/paperclip"],
           requestedConfigurationSnapshot: expect.objectContaining({
             desiredSkills: ["paperclipai/paperclip/paperclip"],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("defaults bundled WeCom desired skills in opencode_local hire approvals", async () => {
+    const db = createDb(true);
+
+    const res = await request(createApp(db))
+      .post("/api/companies/company-1/agent-hires")
+      .send({
+        name: "WeCom Operator",
+        role: "engineer",
+        adapterType: "opencode_local",
+        adapterConfig: {
+          model: "openai/gpt-5.2-codex",
+        },
+      });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(mockApprovalService.create).toHaveBeenCalledWith(
+      "company-1",
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          desiredSkills: [
+            "paperclipai/paperclip/paperclip",
+            "paperclipai/paperclip/wecomcli-contact",
+            "paperclipai/paperclip/wecomcli-todo",
+            "paperclipai/paperclip/wecomcli-meeting",
+            "paperclipai/paperclip/wecomcli-msg",
+            "paperclipai/paperclip/wecomcli-schedule",
+            "paperclipai/paperclip/wecomcli-doc",
+          ],
+          requestedConfigurationSnapshot: expect.objectContaining({
+            desiredSkills: [
+              "paperclipai/paperclip/paperclip",
+              "paperclipai/paperclip/wecomcli-contact",
+              "paperclipai/paperclip/wecomcli-todo",
+              "paperclipai/paperclip/wecomcli-meeting",
+              "paperclipai/paperclip/wecomcli-msg",
+              "paperclipai/paperclip/wecomcli-schedule",
+              "paperclipai/paperclip/wecomcli-doc",
+            ],
           }),
         }),
       }),

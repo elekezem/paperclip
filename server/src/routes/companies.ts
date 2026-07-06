@@ -20,6 +20,7 @@ import {
   budgetService,
   companyPortabilityService,
   companyService,
+  companyWeComService,
   feedbackService,
   logActivity,
 } from "../services/index.js";
@@ -106,6 +107,14 @@ export function companyRoutes(db: Db, storage?: StorageService) {
     res.status(400).json({
       error: "Missing companyId in path. Use /api/companies/{companyId}/issues.",
     });
+  });
+
+  router.get("/:companyId/wecom/status", async (req, res) => {
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    assertBoard(req);
+    const status = await companyWeComService(db).getStatus(companyId);
+    res.json(status);
   });
 
   router.get("/:companyId", async (req, res) => {

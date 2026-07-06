@@ -35,6 +35,8 @@ pnpm paperclipai issue release <issue-id>
 ```sh
 pnpm paperclipai company list
 pnpm paperclipai company get <company-id>
+pnpm paperclipai company wecom status <company-id>
+pnpm paperclipai company wecom init <company-id>
 
 # Export to portable folder package (writes manifest + markdown files)
 pnpm paperclipai company export <company-id> --out ./exports/acme --include company,agents
@@ -55,6 +57,12 @@ pnpm paperclipai company import \
   --new-company-name "Acme Imported" \
   --include company,agents
 ```
+
+WeCom notes:
+
+- `company wecom status` checks bundled skill seeding, `opencode` availability, `wecom-cli` availability, and whether the company-scoped WeCom profile has been initialized.
+- `company wecom init` runs the official `wecom-cli init` flow with the company's isolated `WECOM_CLI_CONFIG_DIR` and `WECOM_CLI_TMP_DIR`.
+- In v1, WeCom tasks must run on `opencode_local`.
 
 ## Agent Commands
 
